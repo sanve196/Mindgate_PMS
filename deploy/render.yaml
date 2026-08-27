@@ -1,0 +1,26 @@
+# Agentic PMS — per-client Render blueprint (dev/reference; client prod may
+# be their own cloud per deploy-and-transfer). One instance = one tenant.
+services:
+  - type: web
+    name: agentic-pms-api
+    env: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # dashboard-managed; value never in repo
+      - key: JWT_SECRET
+        sync: false
+      - key: TENANT_SLUG
+        value: CHANGE_ME
+      - key: AUTH_DEV
+        value: "false"       # "true" only on dev instances
+  - type: web
+    name: agentic-pms-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+databases:
+  - name: agentic-pms-db

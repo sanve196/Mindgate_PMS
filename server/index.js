@@ -1,0 +1,50 @@
+// Agentic PMS — server entrypoint.
+// Boot order: env check → migrations (FAIL boot on error — a schema the code
+// expects but doesn't have is a broken deploy, not a degraded state) →
+// tenant resolution → routes.
+
+const express = require('express');
+const cors = require('cors');
+const db = require('./core/db');
+const logger = require('./core/logger');
+const { runMigrations } = require('./core/migrate');
+const { authenticate, devLogin } = require('./core/auth');
+const employees = require('./core/employees');
+
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'TENANT_SLUG'];
+
+async function main() {
+  const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+  if (missing.length) { logger.error('Missing required env', { missing }); process.exit(1); }
+
+  await runMigrations(); // throws → process exits nonzero → deploy fails loudly
+
+  // Single-tenant instance: resolve (or create) the tenant for this deployment.
+  const slug = process.env.TENANT_SLUG;
+  let t = (await db.query(`SELECT id FROM core.tenants WHERE slug=$1`, [slug])).rows[0];
+  if (!t) {
+    t = (await db.query(`INSERT INTO core.tenants (name, slug) VALUES ($1,$1) RETURNING id`, [slug])).rows[0];
+    logger.info('tenant created', { slug });
+  }
+  const TENANT_ID = t.id;
+
+  const app = express();
+  app.use(cors());
+  app.use(express.json({ limit: '2mb' }));
+  app.use((req, _res, next) => { req.tenantId = TENANT_ID; next(); });
+
+  app.get('/api/v1/health', (_req, res) => res.json({ ok: true, service: 'agentic-pms' }));
+  app.post('/api/v1/auth/dev-login', devLogin);
+  app.get('/api/v1/me', authenticate, (req, res) => res.json({ user: req.user }));
+
+  app.use('/api/v1/employees', employees.router);
+  // modules mount here as they are lifted:
+  // app.use('/api/v1/pms', require('./modules/performance').router);
+  // app.use('/api/v1/engagement', require('./modules/engagement').router);
+  // app.use('/api/v1/people', require('./modules/people').router);
+
+  const port = process.env.PORT || 8080;
+  app.listen(port, () => logger.info('agentic-pms up', { port, tenant: slug }));
+}
+
+main().catch(e => { logger.error('boot failed', { error: e.message }); process.exit(1); });
