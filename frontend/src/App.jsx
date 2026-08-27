@@ -1,52 +1,98 @@
-// Agentic PMS — Phase 0 frontend shell.
-// Deliberately minimal: login (dev), employee directory, CSV import with the
-// dry-run validation report. The real product UI arrives in Phases 1–2 by
-// lifting the AH pages (UI preservation is a spec requirement); this shell
-// exists so Phase 0's exit test is clickable, not curl-able.
-
 import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User } from 'lucide-react';
+import { api } from './utils/api';
+import MyKRASheetPage from './pages/MyKRASheetPage';
+import SelfAppraisalPage from './pages/SelfAppraisalPage';
+import TeamEvalPage from './pages/TeamEvalPage';
+import HodQueuePage from './pages/HodQueuePage';
+import CycleAdminPage from './pages/CycleAdminPage';
+import CalibrationPage from './pages/CalibrationPage';
+import MyRatingPage from './pages/MyRatingPage';
+import EngagementPage from './pages/EngagementPage';
+import PeopleHubPage from './pages/PeopleHubPage';
+import DirectoryPage from './pages/DirectoryPage';
 
-const api = async (path, opts = {}) => {
-  const token = localStorage.getItem('apms_token');
-  const res = await fetch(`/api/v1${path}`, {
-    ...opts,
-    headers: { ...(opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-               ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { data });
-  return data;
-};
+const NAV = [
+  { group: 'My Performance', items: [
+    { to: '/my/kras', label: 'My KRAs', icon: Target },
+    { to: '/my/self-appraisal', label: 'Self-Appraisal', icon: ClipboardList },
+    { to: '/my/rating', label: 'My Rating', icon: Star },
+  ]},
+  { group: 'Team', items: [
+    { to: '/team/eval', label: 'Team Evaluation', icon: Users },
+    { to: '/hod', label: 'HOD Review', icon: Landmark },
+  ]},
+  { group: 'HR Admin', items: [
+    { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
+    { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
+    { to: '/admin/directory', label: 'Employees', icon: Upload },
+  ]},
+  { group: 'Engagement & People', items: [
+    { to: '/engagement', label: 'Engagement', icon: HeartHandshake },
+    { to: '/people', label: 'People Hub', icon: User },
+  ]},
+];
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState('directory');
+  const [checked, setChecked] = useState(false);
   useEffect(() => {
-    if (localStorage.getItem('apms_token')) {
-      api('/me').then(r => setUser(r.user)).catch(() => localStorage.removeItem('apms_token'));
-    }
+    const t = localStorage.getItem('apms_token');
+    if (!t) { setChecked(true); return; }
+    api('/me').then(r => setUser(r.user)).catch(() => localStorage.removeItem('apms_token')).finally(() => setChecked(true));
   }, []);
+  if (!checked) return null;
   if (!user) return <Login onUser={setUser} />;
   return (
-    <div className="shell">
-      <header>
-        <h1>Agentic PMS</h1>
-        <nav>
-          <button className={view === 'directory' ? 'on' : ''} onClick={() => setView('directory')}>Directory</button>
-          <button className={view === 'import' ? 'on' : ''} onClick={() => setView('import')}>Import</button>
-        </nav>
-        <span className="who">{user.name} · {user.role}
-          <button onClick={() => { localStorage.removeItem('apms_token'); setUser(null); }}>Sign out</button>
-        </span>
-      </header>
-      {view === 'directory' ? <Directory /> : <ImportCsv />}
-    </div>
+    <BrowserRouter>
+      <div className="min-h-screen lg:flex">
+        <aside className="lg:w-56 lg:shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-stone-200">
+          <div className="px-4 py-4 flex items-center justify-between lg:block">
+            <h1 className="text-base font-bold flex items-center gap-2"><Sparkles size={16} className="text-amber-500" /> Agentic PMS</h1>
+            <button className="lg:hidden btn-sec" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}><LogOut size={12} /></button>
+          </div>
+          <nav className="px-2 pb-4 flex lg:block overflow-x-auto gap-1">
+            {NAV.map(g => (
+              <div key={g.group} className="lg:mb-3 flex lg:block gap-1">
+                <p className="hidden lg:block px-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">{g.group}</p>
+                {g.items.map(it => (
+                  <NavLink key={it.to} to={it.to}
+                    className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap ${isActive ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-stone-100'}`}>
+                    <it.icon size={14} />{it.label}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <div className="hidden lg:block px-4 py-3 border-t border-stone-100 text-xs text-slate-500">
+            {user.name} · {user.role}
+            <button className="block mt-1 text-amber-700 font-medium" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}>Sign out</button>
+          </div>
+        </aside>
+        <main className="flex-1 min-w-0 p-4 lg:p-6">
+          <Routes>
+            <Route path="/" element={<Navigate to="/my/kras" replace />} />
+            <Route path="/my/kras" element={<MyKRASheetPage />} />
+            <Route path="/my/self-appraisal" element={<SelfAppraisalPage />} />
+            <Route path="/my/rating" element={<MyRatingPage />} />
+            <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
+            <Route path="/hod" element={<HodQueuePage />} />
+            <Route path="/admin/cycles" element={<CycleAdminPage />} />
+            <Route path="/admin/calibration" element={<CalibrationPage />} />
+            <Route path="/admin/directory" element={<DirectoryPage />} />
+            <Route path="/engagement" element={<EngagementPage />} />
+            <Route path="/people" element={<PeopleHubPage user={user} />} />
+            <Route path="*" element={<Navigate to="/my/kras" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
   );
 }
 
 function Login({ onUser }) {
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
-  const [err, setErr] = useState(null);
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [err, setErr] = useState(null);
   const go = async () => {
     setErr(null);
     try {
@@ -55,61 +101,13 @@ function Login({ onUser }) {
     } catch (e) { setErr(e.message); }
   };
   return (
-    <div className="login">
-      <h1>Agentic PMS</h1>
-      <input placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
-      <input placeholder="password" type="password" value={password} onChange={e => setPassword(e.target.value)}
-             onKeyDown={e => e.key === 'Enter' && go()} />
-      {err && <p className="err">{err}</p>}
-      <button onClick={go}>Sign in</button>
-      <p className="hint">Dev login — production instances authenticate via the client's identity provider.</p>
-    </div>
-  );
-}
-
-function Directory() {
-  const [rows, setRows] = useState(null); const [err, setErr] = useState(null);
-  useEffect(() => { api('/employees').then(r => setRows(r.employees)).catch(e => setErr(e.message)); }, []);
-  if (err) return <p className="err">{err}</p>;
-  if (!rows) return <p>Loading…</p>;
-  if (!rows.length) return <p>No employees yet — use Import to load the client CSV.</p>;
-  return (
-    <table>
-      <thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Department</th><th>Designation</th><th>Manager</th><th>Status</th></tr></thead>
-      <tbody>{rows.map(r => (
-        <tr key={r.id}><td>{r.emp_code || '—'}</td><td>{r.name}</td><td>{r.email}</td>
-          <td>{r.department || '—'}</td><td>{r.designation || '—'}</td><td>{r.manager_name || '—'}</td><td>{r.status}</td></tr>
-      ))}</tbody>
-    </table>
-  );
-}
-
-function ImportCsv() {
-  const [report, setReport] = useState(null); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
-  const send = async (file, commit) => {
-    setBusy(true); setErr(null);
-    const fd = new FormData(); fd.append('file', file);
-    try { setReport(await api(`/employees/import${commit ? '?commit=1' : ''}`, { method: 'POST', body: fd })); }
-    catch (e) { setErr(e.message); setReport(e.data && e.data.errors ? e.data : null); }
-    setBusy(false);
-  };
-  const [file, setFile] = useState(null);
-  return (
-    <div>
-      <h2>Employee CSV import</h2>
-      <p>Columns: emp_code, name*, email*, department, designation, role_band, manager_email, date_of_joining (any common format), status. Dry run first; commit only when clean.</p>
-      <input type="file" accept=".csv" onChange={e => setFile(e.target.files[0])} />
-      <button disabled={!file || busy} onClick={() => send(file, false)}>Validate (dry run)</button>
-      <button disabled={!file || busy || !(report && report.ok && !report.committed)} onClick={() => send(file, true)}>Commit load</button>
-      {err && <p className="err">{err}</p>}
-      {report && (
-        <div className="report">
-          <p><b>{report.committed ? 'LOADED' : report.ok ? 'VALID (dry run)' : 'REJECTED'}</b>
-            {report.summary && ` — ${report.summary.total} rows, ${report.summary.errors} errors, ${report.summary.warnings} warnings, ${report.summary.departments} departments`}</p>
-          {(report.errors || []).map((e, i) => <p key={i} className="err">line {e.line}: {e.error}</p>)}
-          {(report.warnings || []).map((w, i) => <p key={i} className="warn">line {w.line}: {w.warning}</p>)}
-        </div>
-      )}
+    <div className="max-w-xs mx-auto mt-[14vh] flex flex-col gap-3">
+      <h1 className="text-lg font-bold flex items-center gap-2"><Sparkles size={18} className="text-amber-500" /> Agentic PMS</h1>
+      <input className="inp" placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
+      <input className="inp" type="password" placeholder="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
+      {err && <p className="text-xs text-rose-600">{err}</p>}
+      <button className="btn-pri" onClick={go}>Sign in</button>
+      <p className="text-[11px] text-slate-400">Production instances sign in with your organisation's identity provider.</p>
     </div>
   );
 }

@@ -1,18 +1,12 @@
-/* Phase 0 shell styling — intentionally plain; product UI arrives with the lifted pages. */
-* { box-sizing: border-box; } body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #1e293b; background: #faf9f7; }
-.shell { max-width: 1000px; margin: 0 auto; padding: 16px; }
-header { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #e7e5e4; padding-bottom: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-h1 { font-size: 18px; margin: 0; } h2 { font-size: 15px; }
-nav button, .who button { margin-left: 8px; padding: 6px 12px; border: 1px solid #d6d3d1; background: #fff; border-radius: 8px; cursor: pointer; }
-nav button.on { background: #1e293b; color: #fff; border-color: #1e293b; }
-.who { margin-left: auto; color: #78716c; font-size: 12px; }
-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; overflow: hidden; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f5f5f4; font-size: 13px; }
-th { background: #fafaf9; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #78716c; }
-.login { max-width: 320px; margin: 12vh auto; display: flex; flex-direction: column; gap: 10px; }
-.login input { padding: 9px 12px; border: 1px solid #d6d3d1; border-radius: 8px; }
-.login button, div > button { padding: 8px 14px; border: 0; background: #1e293b; color: #fff; border-radius: 8px; cursor: pointer; margin-right: 8px; margin-top: 8px; }
-button:disabled { opacity: .45; cursor: default; }
-.err { color: #dc2626; font-size: 13px; } .warn { color: #b45309; font-size: 13px; }
-.hint { color: #a8a29e; font-size: 12px; }
-.report { margin-top: 12px; background: #fff; border: 1px solid #e7e5e4; border-radius: 10px; padding: 12px; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { @apply bg-stone-50 text-slate-800 antialiased; }
+.card { @apply bg-white border border-stone-200 rounded-xl; }
+.btn { @apply text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer disabled:opacity-45 disabled:cursor-default; }
+.btn-pri { @apply btn text-white bg-slate-800 hover:bg-slate-700; }
+.btn-sec { @apply btn text-slate-700 border border-stone-300 bg-white hover:bg-stone-50; }
+.inp { @apply w-full text-sm px-3 py-2 bg-white border border-stone-300 rounded-lg focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200; }
+.lbl { @apply text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1; }
+.chip { @apply text-[10px] font-semibold px-2 py-0.5 rounded-full; }

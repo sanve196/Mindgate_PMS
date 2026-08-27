@@ -20,6 +20,23 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 - Phase 0 COMPLETE in code 27-Aug: mail (send-mode, provider slots),
   notifications API. Storage iface deferred to first upload need (evidence).
   STILL PENDING: run against a real Postgres (exit test in plan §3).
+- FRONTEND (product pages) 27-Aug: Tailwind + react-router + lucide added;
+  App shell with grouped nav (My Performance / Team / HR Admin / Engagement
+  & People) matching AH design language (stone/amber/slate). Pages: MyKRAs
+  (weights chip, submit gated at 100, returned-with-comment banner),
+  SelfAppraisal (per-KRA narratives, 1.2s auto-save badge, submit locks),
+  MyRating, TeamEval (self-appraisal panel, rating select from cycle scale,
+  "Draft the writing" agent button -> DRAFT card -> copy-into-fields,
+  auto-save), HodQueue, CycleAdmin (phase strip, advance/rollback, publish
+  w/ failure alert, cycle-health agent card), Calibration (distribution vs
+  targets, adjust-with-required-reason prompt, 9-box select, session-brief
+  agent), Engagement (invitations, take-flow with anonymity notice +
+  opt-in checkbox, results w/ eNPS, theme-verbatims agent; prompt-based
+  builder is INTERIM — real survey-builder screen still owed), PeopleHub
+  (events RSVP, awards nominate, CSR, query threads), Directory (CSV
+  import UI). Build clean. NOT YET: real survey/cycle builder screens
+  (prompt()-based interim), evidence upload, connects UI, career UI,
+  letter PDF, mobile pass, e2e against live server.
 - Phase 3 DONE (backend) 27-Aug: core/ai.js — ONE narration entry point
   (Anthropic API via fetch, AI_MODEL env, 503 when no key so everything else
   works), parseAiJson + stripRatingSuggestions PURE+tested (no rating-shaped

@@ -1,0 +1,25 @@
+import { useEffect, useState } from 'react';
+import { api } from '../utils/api';
+
+export default function MyRatingPage() {
+  const [rows, setRows] = useState(null); const [err, setErr] = useState(null);
+  useEffect(() => { api('/pms/my/rating').then(r => setRows(r.history)).catch(e => setErr(e.message)); }, []);
+  if (err) return <p className="text-sm text-rose-600">{err}</p>;
+  if (!rows) return <p className="text-sm text-slate-400">Loading…</p>;
+  return (
+    <div className="max-w-2xl space-y-4">
+      <h2 className="text-lg font-bold">My Rating History</h2>
+      {!rows.length ? <div className="card p-8 text-center text-sm text-slate-400">No published ratings yet. Ratings appear here after HR publishes a cycle.</div> : (
+        <div className="card divide-y divide-stone-100">
+          {rows.map(r => (
+            <div key={r.cycle_id} className="p-4 flex items-center justify-between">
+              <div><p className="text-sm font-semibold">{r.cycle_name}</p><p className="text-xs text-slate-400">{r.fiscal_year} · published {new Date(r.published_at).toLocaleDateString('en-IN')}</p></div>
+              <div className="text-right"><p className="text-xl font-bold">{r.final_rating}</p><p className="text-xs text-slate-500">{r.rating_label || ''}</p></div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-slate-400">Questions about a rating? Raise an appraisal query in People Hub — it reaches HR with a tracked thread.</p>
+    </div>
+  );
+}
