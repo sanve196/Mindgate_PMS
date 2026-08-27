@@ -20,6 +20,15 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 - Phase 0 COMPLETE in code 27-Aug: mail (send-mode, provider slots),
   notifications API. Storage iface deferred to first upload need (evidence).
   STILL PENDING: run against a real Postgres (exit test in plan §3).
+- Phase 2 STARTED 27-Aug: migration 004 (engagement + people schemas —
+  anonymity STRUCTURAL: invitations/responses separate, employee_id on a
+  response only via tested shouldAttribute()); engagement router (survey
+  CRUD+questions, open builds invitations+notifies, take-flow with required-
+  question check, results with eNPS + verbatims with no identity in reach);
+  people router (awards programs/cycles/nominations+decide, events+RSVP,
+  CSR+participation, campus drives/candidates, appraisal queries+threads,
+  career matrix). 18/18 tests. NOT YET: engagement frontend, survey builder
+  screen, people frontend, midyear, evidence upload, agentic module.
 - Phase 1 STARTED 27-Aug: migration 003 (full pms schema), phase machine
   (pure, 5 tests), performance router: cycles+phase transitions/rollback,
   KRA sheets (edit/submit/approve-return, weight=100), self-appraisal,

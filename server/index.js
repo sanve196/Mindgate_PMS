@@ -40,9 +40,8 @@ async function main() {
   app.use('/api/v1/employees', employees.router);
   app.use('/api/v1/notifications', require('./core/notifications').router);
   app.use('/api/v1/pms', require('./modules/performance').router);
-  // Phase 2 mounts:
-  // app.use('/api/v1/engagement', require('./modules/engagement').router);
-  // app.use('/api/v1/people', require('./modules/people').router);
+  app.use('/api/v1/engagement', require('./modules/engagement').router);
+  app.use('/api/v1/people', require('./modules/people').router);
 
   const port = process.env.PORT || 8080;
   app.listen(port, () => logger.info('agentic-pms up', { port, tenant: slug }));
