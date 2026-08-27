@@ -42,6 +42,7 @@ async function main() {
   app.use('/api/v1/pms', require('./modules/performance').router);
   app.use('/api/v1/engagement', require('./modules/engagement').router);
   app.use('/api/v1/people', require('./modules/people').router);
+  app.use('/api/v1/agentic', require('./modules/agentic').router);
 
   const port = process.env.PORT || 8080;
   app.listen(port, () => logger.info('agentic-pms up', { port, tenant: slug }));

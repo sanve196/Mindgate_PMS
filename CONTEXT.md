@@ -20,6 +20,18 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 - Phase 0 COMPLETE in code 27-Aug: mail (send-mode, provider slots),
   notifications API. Storage iface deferred to first upload need (evidence).
   STILL PENDING: run against a real Postgres (exit test in plan §3).
+- Phase 3 DONE (backend) 27-Aug: core/ai.js — ONE narration entry point
+  (Anthropic API via fetch, AI_MODEL env, 503 when no key so everything else
+  works), parseAiJson + stripRatingSuggestions PURE+tested (no rating-shaped
+  key survives any draft, second line of defence after the prompts), every
+  draft stored in agentic.drafts with its deterministic input verbatim.
+  modules/agentic: the five §5A features — appraisal-draft (manager-scoped,
+  ignores self-RATINGS uses narratives), calibration-brief (distribution vs
+  bell curve by dept), engagement-themes (verbatims only, anonymity by
+  construction, one short quote max per theme), letter-draft (exact
+  rating/label, template adds branding), cycle-health (coverage per stage +
+  chase list). GET /agentic/drafts lists provenance. NOT YET: real API call
+  ever made (no key in sandbox), frontend surfaces for drafts.
 - Phase 2 STARTED 27-Aug: migration 004 (engagement + people schemas —
   anonymity STRUCTURAL: invitations/responses separate, employee_id on a
   response only via tested shouldAttribute()); engagement router (survey
