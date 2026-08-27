@@ -38,8 +38,9 @@ async function main() {
   app.get('/api/v1/me', authenticate, (req, res) => res.json({ user: req.user }));
 
   app.use('/api/v1/employees', employees.router);
-  // modules mount here as they are lifted:
-  // app.use('/api/v1/pms', require('./modules/performance').router);
+  app.use('/api/v1/notifications', require('./core/notifications').router);
+  app.use('/api/v1/pms', require('./modules/performance').router);
+  // Phase 2 mounts:
   // app.use('/api/v1/engagement', require('./modules/engagement').router);
   // app.use('/api/v1/people', require('./modules/people').router);
 

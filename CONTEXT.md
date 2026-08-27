@@ -17,8 +17,18 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 - Phase 0 (People Core): SCAFFOLDED 27-Aug-2026 — runner, schema 001,
   auth (JWT + dev-login), permissions (parity gate), employees mirror +
   validated CSV import (9/9 tests), seed 002, deploy files, frontend shell.
-- Phase 0 remaining: mail interface + send-mode, storage iface, notifications
-  read API, run against a real Postgres (exit test in plan §3).
+- Phase 0 COMPLETE in code 27-Aug: mail (send-mode, provider slots),
+  notifications API. Storage iface deferred to first upload need (evidence).
+  STILL PENDING: run against a real Postgres (exit test in plan §3).
+- Phase 1 STARTED 27-Aug: migration 003 (full pms schema), phase machine
+  (pure, 5 tests), performance router: cycles+phase transitions/rollback,
+  KRA sheets (edit/submit/approve-return, weight=100), self-appraisal,
+  manager eval, HOD queue, calibration (distribution vs bell curve,
+  adjustments with mandatory reason, top-talent/9-box), publish (history +
+  rating mirror + letter records + notify, per-row failures), my-rating,
+  connects. NOT YET: evidence upload, PIP routes, career framework, midyear
+  specifics, closure-letter PDF, frontend pages (lift in P1 continuation),
+  behavioural parity pass against AH source route-by-route.
 - Phases 1-4: see Extraction Plan. Source repo for lifting:
   nileshsatpute82/agentic-humans-platform (route-prefix lifting only).
 
