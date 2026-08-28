@@ -36,6 +36,23 @@ async function activeCycle(tenantId, type = null) {
   return r.rows[0] || null;
 }
 
+// BR-6.6: "For employees flagged under BR-6.5 [Super 50], proactively
+// alert HR/Management to consider retention actions." Fans out an in-app
+// notification to every employee holding the hr or admin role in this
+// tenant (core.user_roles) — not a single fixed recipient, since who holds
+// those roles varies per client/tenant. Best-effort: a failed notify() for
+// one HR user must not roll back the publish that triggered it.
+async function alertHrOfRetentionRisk(tenantId, employee) {
+  const hrAndAdmin = (await db.query(
+    `SELECT e.id FROM core.employees e JOIN core.user_roles ur ON ur.tenant_id=e.tenant_id AND LOWER(ur.email)=LOWER(e.email)
+      WHERE e.tenant_id=$1 AND e.status='active' AND ur.role IN ('hr','admin')`, [tenantId])).rows;
+  const title = `Retention alert: ${employee.name} is a consistent top performer`;
+  const body = 'Flagged on the Super 50 watchlist (3 consecutive top-tier ratings, most recently the highest grade). Consider retention actions — a bonus, fast-track promotion, or a leadership succession conversation.';
+  await Promise.all(hrAndAdmin.map((h) =>
+    notify(tenantId, h.id, 'retention_alert', title, body, '/pms/watchlist').catch((e) => logger.warn('retention alert notify failed', { error: e.message }))));
+  return hrAndAdmin.length;
+}
+
 // ---------------- Cycles -----------------------------------------------------
 router.get('/cycles', async (req, res) => {
   const r = await db.query(`SELECT * FROM pms.cycles WHERE tenant_id=$1 ORDER BY created_at DESC`, [T(req)]);
@@ -407,7 +424,7 @@ router.post('/publish', async (req, res) => {
     const c = await activeCycle(T(req));
     if (!c || !pm.phaseAllows(c.phase, 'publish')) return res.status(409).json({ error: `Publish is not open (phase: ${c ? c.phase : 'none'})` });
     const rows = (await db.query(
-      `SELECT e.id AS employee_id,
+      `SELECT e.id AS employee_id, e.name AS employee_name,
               COALESCE(adj.to_rating, he.overall_rating, me.overall_rating) AS final_rating,
               tt.potential_rating, tt.nine_box_cell
          FROM core.employees e
@@ -452,6 +469,10 @@ router.post('/publish', async (req, res) => {
             super50Flagged++;
             audit(req, 'SUPER50_FLAGGED', c.id, r.employee_id, { ratings: hist.map((x) => x.final_rating) });
             await notify(T(req), r.employee_id, 'super50_flagged', 'You have been recognised as a consistent top performer', null, '/pms/my-rating');
+            // BR-6.6: proactively alert HR/Management to consider retention
+            // actions for this newly-flagged employee.
+            const alerted = await alertHrOfRetentionRisk(T(req), { id: r.employee_id, name: r.employee_name });
+            audit(req, 'RETENTION_ALERT_SENT', c.id, r.employee_id, { alerted_recipients: alerted });
           } else if (!eligible && wasFlagged) {
             await db.query(`UPDATE core.employees SET super50_flag=false, super50_since=NULL WHERE id=$1`, [r.employee_id]);
             audit(req, 'SUPER50_UNFLAGGED', c.id, r.employee_id, { ratings: hist.map((x) => x.final_rating) });

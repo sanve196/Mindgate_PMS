@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const HAS_DB = !!process.env.DATABASE_URL;
 const skip = !HAS_DB && 'DATABASE_URL not set — see file header';
 
-let db, server, base, empId;
+let db, server, base, empId, tenantId;
 
 before(async () => {
   if (!HAS_DB) return;
@@ -24,6 +24,7 @@ before(async () => {
 
   const slug = process.env.TENANT_SLUG;
   const t = (await db.query(`INSERT INTO core.tenants (name, slug) VALUES ($1,$1) RETURNING id`, [slug])).rows[0];
+  tenantId = t.id;
   await require('../migrations/002-default-permission-bundles').ensureTenantSeeds(db, t.id);
 
   const mgr = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'S50 Mgr','s50-mgr@x.com','active') RETURNING id`, [t.id])).rows[0];
@@ -90,6 +91,14 @@ test('Super 50: flags only after 3 consecutive A/A+ with the most recent an A+, 
 
   const c3 = await runAnnualCycle(hrTok, mgrTok, 5, 'S50-FY3');
   assert.equal(c3.body.super50_flagged, 1, '3rd consecutive top-tier, most recent is A+ (5) — now eligible');
+
+  // BR-6.6: the HR user should have received a proactive retention_alert
+  // notification the moment the flag was set, not just a passive watchlist.
+  const notifs = await db.query(
+    `SELECT n.title FROM core.notifications n JOIN core.employees e ON e.id=n.employee_id
+      WHERE e.email='s50-hr@x.com' AND e.tenant_id=$1 AND n.kind='retention_alert'`, [tenantId]);
+  assert.equal(notifs.rows.length, 1, 'exactly one retention alert sent to the HR user');
+  assert.match(notifs.rows[0].title, /S50 Emp/);
 
   const list1 = await api('/pms/watchlist', hrTok);
   assert.equal(list1.body.watchlist.length, 1);

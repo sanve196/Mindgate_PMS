@@ -14,6 +14,26 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Retention Alerts built (BR-6.6)** + **notification bell added
+  to the frontend shell** (a cross-cutting gap found while building this:
+  GET/POST /notifications had existed since Phase 0 with zero frontend
+  surface — every notification created so far, PIP-opened, Super50-flagged,
+  rating-published, was invisible to users until now).
+  alertHrOfRetentionRisk() in modules/performance/index.js fans out an
+  in-app notification to every employee holding the hr or admin role in
+  the tenant (core.user_roles), the instant someone is newly Super50-
+  flagged inside /publish — best-effort (a failed notify() for one HR user
+  doesn't roll back the publish). Verified live + via super50.test.js
+  (extended to assert exactly one retention_alert notification with the
+  right employee name in the title lands on the HR user). Caught and fixed
+  a real bug in my OWN test while doing this: the assertion query wasn't
+  tenant-scoped, so a stale employee row with the same test email from an
+  earlier run in this persistent test DB caused a false failure (count=2
+  instead of 1) — fixed by scoping the query to the test's own tenant_id.
+  frontend/src/pages/NotificationBell.jsx: polling dropdown (60s interval —
+  no push channel exists), unread badge, click-to-mark-read, wired into
+  App.jsx's header on both breakpoints. Verified with a clean production
+  build. 39/39 backend tests pass with DB attached.
 - 28-Aug-2026: **Super 50 / High-Performer Watchlist built (BR-6.5)**.
   migrations/007-super50.js adds core.employees.super50_flag/super50_since
   (persisted, alongside the existing potential_rating/nine_box_cell

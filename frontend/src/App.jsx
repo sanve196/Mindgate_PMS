@@ -14,6 +14,7 @@ import PeopleHubPage from './pages/PeopleHubPage';
 import DirectoryPage from './pages/DirectoryPage';
 import PIPPage from './pages/PIPPage';
 import WatchlistPage from './pages/WatchlistPage';
+import NotificationBell from './pages/NotificationBell';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -52,9 +53,12 @@ export default function App() {
     <BrowserRouter>
       <div className="min-h-screen lg:flex">
         <aside className="lg:w-56 lg:shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-stone-200">
-          <div className="px-4 py-4 flex items-center justify-between lg:block">
+          <div className="px-4 py-4 flex items-center justify-between">
             <h1 className="text-base font-bold flex items-center gap-2"><Sparkles size={16} className="text-amber-500" /> Agentic PMS</h1>
-            <button className="lg:hidden btn-sec" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}><LogOut size={12} /></button>
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <button className="lg:hidden btn-sec" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}><LogOut size={12} /></button>
+            </div>
           </div>
           <nav className="px-2 pb-4 flex lg:block overflow-x-auto gap-1">
             {NAV.map(g => (
