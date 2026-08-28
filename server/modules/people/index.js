@@ -268,4 +268,50 @@ router.put('/career/matrix', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Employee-facing career path (BR-3.1/3.2) — FOUND MISSING alongside
+// Development Plan, 28-Aug-2026: only the HR-configured matrix above and
+// the raw people.career_paths table (migration 004) existed; no route let
+// an employee actually set or view their own path. "Guardrails" (BR-3.2)
+// are enforced softly: if HR has configured any career_matrix role_bands,
+// a target_role must match one of them; if the matrix is still empty,
+// nothing is blocked (an unconfigured guardrail can't guard anything yet).
+router.get('/career/my-path', async (req, res) => {
+  try {
+    const p = (await db.query(`SELECT target_role, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [T(req), req.user.id])).rows[0];
+    const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1 ORDER BY role_band`, [T(req)])).rows.map((r) => r.role_band);
+    res.json({ path: p || null, eligible_role_bands: bands });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/career/my-path', async (req, res) => {
+  try {
+    const { target_role, plan } = req.body || {};
+    if (!target_role || !String(target_role).trim()) return res.status(400).json({ error: 'target_role required' });
+    const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1`, [T(req)])).rows.map((r) => r.role_band);
+    if (bands.length && !bands.includes(target_role)) {
+      return res.status(422).json({ error: `target_role must be one of the organisation's configured guardrails: ${bands.join(', ')}` });
+    }
+    await db.query(
+      `INSERT INTO people.career_paths (tenant_id, employee_id, target_role, plan) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id, employee_id) DO UPDATE SET target_role=EXCLUDED.target_role, plan=EXCLUDED.plan, updated_at=now()`,
+      [T(req), req.user.id, target_role.trim(), plan || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manager view of their reports' career paths — general awareness, no
+// approval step (BR-3.1 says employees define their own aspiration; there
+// is no "manager approves career path" requirement in the BRD, unlike KRAs
+// and Development Plans).
+router.get('/career/team', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const r = await db.query(
+      `SELECT e.id AS employee_id, e.name, cp.target_role, cp.plan, cp.updated_at
+         FROM core.employees e LEFT JOIN people.career_paths cp ON cp.tenant_id=e.tenant_id AND cp.employee_id=e.id
+        WHERE e.tenant_id=$1 AND e.manager_id=$2 AND e.status='active' ORDER BY e.name`, [T(req), req.user.id]);
+    res.json({ team: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = { router };

@@ -210,6 +210,129 @@ router.post('/team/kra-sheets/:sheetId/decide', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- Development Plan (Org IDP) — BR-2.1/2.2/2.3 --------------
+// Mirrors the KRA sheet pattern above deliberately: same draft/submitted/
+// approved/returned lifecycle, same kra_open phase window (new devplan_*
+// actions within it, see phase-machine.js), same one-row-per-employee-
+// per-cycle shape. Progress updates (BR-2.3) are the one exception — NOT
+// phase-gated, since "see progress at any point in the year" means
+// ongoing tracking outside the KRA-setting window, once a plan exists.
+router.get('/my/development-plan', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, plan: null, goals: [] });
+    let p = (await db.query(`SELECT * FROM pms.development_plans WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+    if (!p) {
+      const mgr = (await db.query(`SELECT manager_id FROM core.employees WHERE id=$1`, [req.user.id])).rows[0];
+      p = (await db.query(
+        `INSERT INTO pms.development_plans (tenant_id, cycle_id, employee_id, manager_id) VALUES ($1,$2,$3,$4) RETURNING *`,
+        [T(req), c.id, req.user.id, mgr ? mgr.manager_id : null])).rows[0];
+    }
+    const goals = (await db.query(`SELECT * FROM pms.development_goals WHERE plan_id=$1 ORDER BY sort_order`, [p.id])).rows;
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, plan: p, goals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/my/development-plan/goals', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'devplan_edit')) return res.status(409).json({ error: `Development plan editing is not open (phase: ${c ? c.phase : 'none'})` });
+    const p = (await db.query(`SELECT * FROM pms.development_plans WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+    if (!p) return res.status(404).json({ error: 'plan not found — GET /my/development-plan first' });
+    if (p.status === 'approved') return res.status(409).json({ error: 'plan is approved — ask HR to return it for edits' });
+    const goals = Array.isArray(req.body && req.body.goals) ? req.body.goals : [];
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM pms.development_goals WHERE plan_id=$1`, [p.id]);
+      let i = 0;
+      for (const g of goals) {
+        if (!g.title || !String(g.title).trim()) continue;
+        await client.query(
+          `INSERT INTO pms.development_goals (tenant_id, plan_id, title, description, target_date, progress_pct, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [T(req), p.id, String(g.title).trim(), g.description || null, g.target_date || null, Math.min(100, Math.max(0, Number(g.progress_pct) || 0)), (i += 10)]);
+      }
+      await client.query(`UPDATE pms.development_plans SET status='draft', updated_at=now() WHERE id=$1`, [p.id]);
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    const saved = (await db.query(`SELECT * FROM pms.development_goals WHERE plan_id=$1 ORDER BY sort_order`, [p.id])).rows;
+    res.json({ ok: true, goals: saved });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/my/development-plan/submit', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'devplan_submit')) return res.status(409).json({ error: 'Development plan submission is not open' });
+    const p = (await db.query(`SELECT * FROM pms.development_plans WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+    if (!p) return res.status(404).json({ error: 'plan not found' });
+    const goals = (await db.query(`SELECT id FROM pms.development_goals WHERE plan_id=$1`, [p.id])).rows;
+    if (!goals.length) return res.status(422).json({ error: 'Add at least one development goal before submitting' });
+    await db.query(`UPDATE pms.development_plans SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1`, [p.id]);
+    audit(req, 'DEVPLAN_SUBMITTED', c.id, req.user.id, { goals: goals.length });
+    if (p.manager_id) await notify(T(req), p.manager_id, 'devplan_submitted', `Development plan submitted by ${req.user.name}`, null, '/pms/team');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Progress update — deliberately NOT phase-gated (BR-2.3: "at any point in
+// the year"). Either the employee themself or their manager may update it;
+// it's the one field on an already-approved plan either party can still
+// touch.
+router.put('/my/development-plan/goals/:goalId/progress', async (req, res) => {
+  try {
+    const g = (await db.query(
+      `SELECT dg.*, dp.employee_id, dp.manager_id FROM pms.development_goals dg
+         JOIN pms.development_plans dp ON dp.id=dg.plan_id WHERE dg.id=$1 AND dg.tenant_id=$2`,
+      [req.params.goalId, T(req)])).rows[0];
+    if (!g) return res.status(404).json({ error: 'goal not found' });
+    if (g.employee_id !== req.user.id && g.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) {
+      return res.status(403).json({ error: 'Not your goal or report' });
+    }
+    const { progress_pct } = req.body || {};
+    const n = Number(progress_pct);
+    if (Number.isNaN(n) || n < 0 || n > 100) return res.status(400).json({ error: 'progress_pct must be between 0 and 100' });
+    await db.query(`UPDATE pms.development_goals SET progress_pct=$1 WHERE id=$2`, [n, g.id]);
+    res.json({ ok: true, progress_pct: n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manager: my team's plans + approve/return.
+router.get('/team/development-plans', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, plans: [] });
+    const r = await db.query(
+      `SELECT p.*, e.name AS employee_name, e.email AS employee_email,
+              (SELECT COUNT(*)::int FROM pms.development_goals g WHERE g.plan_id=p.id) AS goal_count,
+              (SELECT COALESCE(AVG(g.progress_pct),0)::int FROM pms.development_goals g WHERE g.plan_id=p.id) AS avg_progress
+         FROM pms.development_plans p JOIN core.employees e ON e.id=p.employee_id
+        WHERE p.cycle_id=$1 AND p.manager_id=$2 ORDER BY e.name`, [c.id, req.user.id]);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, plans: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/team/development-plans/:planId/decide', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const { decision, comment } = req.body || {};
+    if (!['approved', 'returned'].includes(decision)) return res.status(400).json({ error: "decision must be 'approved' or 'returned'" });
+    const p = (await db.query(`SELECT * FROM pms.development_plans WHERE id=$1 AND tenant_id=$2`, [req.params.planId, T(req)])).rows[0];
+    if (!p) return res.status(404).json({ error: 'plan not found' });
+    if (p.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')))
+      return res.status(403).json({ error: 'Not your report' });
+    if (p.status !== 'submitted') return res.status(409).json({ error: `plan is ${p.status}, not submitted` });
+    if (decision === 'returned' && !(comment && comment.trim())) return res.status(422).json({ error: 'A return needs a comment — the employee must know why' });
+    await db.query(`UPDATE pms.development_plans SET status=$1, manager_comment=$2, decided_at=now(), updated_at=now() WHERE id=$3`,
+      [decision, comment || null, p.id]);
+    audit(req, `DEVPLAN_${decision.toUpperCase()}`, p.cycle_id, p.employee_id, { comment: comment || null });
+    await notify(T(req), p.employee_id, 'devplan_decided', `Your development plan was ${decision}`, comment || null, '/pms/my-growth');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- Self-appraisal --------------------------------------------
 router.get('/my/self-appraisal', async (req, res) => {
   try {

@@ -25,9 +25,13 @@ function canCancel(from) {
   return from === 'closed' ? { ok: false, reason: 'closed cycles cannot be cancelled' } : { ok: true };
 }
 
-// What each phase permits (gates for downstream endpoints).
+// What each phase permits (gates for downstream endpoints). Development
+// Plans reuse the kra_open window — same employee-authors/manager-approves
+// shape as KRAs, opened at the same point in the cycle per the BRD's
+// process flow (BR-2.1-2.3 alongside KRA setting), so no new phase is
+// needed, just new action names within the existing one.
 const ALLOWS = {
-  kra_open:       ['kra_edit', 'kra_submit', 'kra_decide'],
+  kra_open:       ['kra_edit', 'kra_submit', 'kra_decide', 'devplan_edit', 'devplan_submit', 'devplan_decide'],
   self_appraisal: ['self_edit', 'self_submit'],
   manager_eval:   ['manager_edit', 'manager_submit'],
   hod_eval:       ['hod_edit', 'hod_submit'],

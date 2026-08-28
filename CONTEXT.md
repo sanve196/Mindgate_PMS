@@ -14,6 +14,56 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Development Plan (BR-2.1/2.2/2.3) + Career Path
+  (BR-3.1/3.2) built** — found to be entirely missing (Development Plan)
+  or half-built (Career Path — HR-admin matrix config existed, zero
+  employee-facing route) despite BOTH being marked "Completed" in the
+  project plan and in this file's own earlier Phase 0 notes. A full
+  codebase search for "development", "IDP", "MyGrowth" turned up nothing
+  before today.
+  migrations/009-development-plan.js: pms.development_plans +
+  pms.development_goals, mirroring pms.kra_sheets/pms.kras deliberately
+  (same draft/submitted/approved/returned lifecycle, same one-row-per-
+  employee-per-cycle shape). Reuses the kra_open phase window via new
+  devplan_edit/devplan_submit/devplan_decide action names in
+  phase-machine.js's ALLOWS table (tested). Progress updates (BR-2.3: "at
+  any point in the year") are deliberately NOT phase-gated — either the
+  employee or their manager can update progress_pct on an already-approved
+  plan's goal at any time.
+  ALSO FOUND AND FIXED in the same migration: people.career_paths
+  (migration 004) had no unique constraint on (tenant_id, employee_id),
+  so an upsert for "set my career path" would have failed at runtime the
+  first time anyone tried it — added the missing constraint (idempotent
+  via pg_constraint check, since Postgres has no ADD CONSTRAINT IF NOT
+  EXISTS). Verified via a full fresh-database migration run (0->9 clean)
+  to prove this is deployable, not just patched over the one already-
+  migrated test database.
+  New routes: GET/PUT /pms/my/development-plan(/goals)(/submit),
+  PUT .../goals/:goalId/progress, GET /pms/team/development-plans +
+  POST .../decide (mirrors KRA manager approval exactly). People module:
+  GET/PUT /people/career/my-path (employee sets target_role + plan;
+  "guardrails" BR-3.2 enforced softly — if HR has configured any
+  career_matrix role_bands, target_role must match one; unconfigured
+  matrix blocks nothing), GET /people/career/team (manager visibility).
+  Frontend: new MyGrowthPage.jsx (nav: My Performance > My Growth) —
+  side-by-side Development Plan (goal CRUD, progress bars, submit) and
+  Career Path (role-band select or free text depending on whether
+  guardrails are configured, plan textarea) per BRD Fig. 5, plus a
+  manager-facing "Team Development Plans" approve/return section (not in
+  the BRD's Fig. 5 itself, but a plan stuck at "submitted" with no way to
+  decide it would not be a usable feature). Verified with a clean
+  production build and a live shape-check against real Postgres
+  confirming the exact JSON the frontend expects.
+  test/development-plan.test.js (2 tests: full lifecycle including the
+  approved-plan-still-allows-progress-updates case, and a genuine
+  unrelated-employee 403 check) + test/career-path.test.js (4 tests:
+  unconfigured guardrails accept anything, configured guardrails reject
+  an unlisted role, manager visibility, upsert-not-duplicate). Caught and
+  fixed a test-isolation bug identical in shape to earlier ones this
+  session (an unscoped subquery picked up more than one row across
+  repeated runs against the shared persistent test DB) before trusting
+  the result. 61/61 tests pass with DB attached (40/61, 21 skipped,
+  without).
 - 28-Aug-2026: **7 Organizational Parameters weighted rating engine built
   (BR-6.2/BR-6.3)** — the biggest remaining piece from the priority order.
   migrations/008-review-parameters.js: pms.review_parameters (configurable

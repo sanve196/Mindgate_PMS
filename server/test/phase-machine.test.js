@@ -27,6 +27,8 @@ test('phase gates', () => {
   assert.equal(pm.phaseAllows('self_appraisal', 'kra_edit'), false);
   assert.equal(pm.phaseAllows('calibration', 'adjust'), true);
   assert.equal(pm.phaseAllows('publish', 'publish'), true);
+  assert.equal(pm.phaseAllows('kra_open', 'devplan_edit'), true, 'development plans share the KRA-setting window');
+  assert.equal(pm.phaseAllows('manager_eval', 'devplan_edit'), false);
 });
 
 test('weights: exactly 100 with tolerance', () => {

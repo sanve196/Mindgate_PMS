@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3 } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -16,12 +16,14 @@ import PIPPage from './pages/PIPPage';
 import WatchlistPage from './pages/WatchlistPage';
 import NotificationBell from './pages/NotificationBell';
 import NineBoxPage from './pages/NineBoxPage';
+import MyGrowthPage from './pages/MyGrowthPage';
 
 const NAV = [
   { group: 'My Performance', items: [
     { to: '/my/kras', label: 'My KRAs', icon: Target },
     { to: '/my/self-appraisal', label: 'Self-Appraisal', icon: ClipboardList },
     { to: '/my/rating', label: 'My Rating', icon: Star },
+    { to: '/my/growth', label: 'My Growth', icon: TrendingUp },
   ]},
   { group: 'Team', items: [
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
@@ -86,6 +88,7 @@ export default function App() {
             <Route path="/my/kras" element={<MyKRASheetPage />} />
             <Route path="/my/self-appraisal" element={<SelfAppraisalPage />} />
             <Route path="/my/rating" element={<MyRatingPage />} />
+            <Route path="/my/growth" element={<MyGrowthPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
             <Route path="/hod" element={<HodQueuePage />} />
             <Route path="/pip" element={<PIPPage />} />
