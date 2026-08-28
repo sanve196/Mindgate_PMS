@@ -14,6 +14,29 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Mid-Year 7-Parameter Pulse Check built (BRD Fig. 7b)**.
+  "Employees complete a pulse check on their own experience, for their own
+  reference... informational only, does not feed the Annual Review
+  score." Built as a STRUCTURALLY isolated feature rather than trusting a
+  runtime check: migrations/011-pulse-check.js adds pms.pulse_checks as a
+  separate table from pms.parameter_scores (the Annual Review's engine,
+  migration 008) — scoring a pulse check literally cannot write to
+  pms.manager_evaluations because the code path never touches that table
+  at all. Self-only routes: GET/PUT /pms/my/pulse-check (available only
+  on an active MIDYEAR cycle via activeCycle(tenantId,'midyear'); shows
+  the same 7 org-configured parameters as Annual, but a simple self-only
+  average, not a weighted rating). Frontend: new PulseCheckPage.jsx (nav:
+  My Performance > Pulse Check) — five-button 1-5 scoring per parameter,
+  self-average shown for personal reflection. Verified with a clean
+  production build. test/pulse-check.test.js: 4 integration tests, the
+  critical one directly querying pms.manager_evaluations before/after
+  maxing out every parameter to prove zero rows are ever created there.
+  84/84 tests pass with DB attached (48/84, 36 skipped, without).
+  FLAGGED, NOT YET BUILT: there is no dedicated Mid-Year Review page in
+  the frontend at all (unlike Annual Review, which got a proper
+  consolidated screen this session) — worth checking whether the
+  project-plan items 27-30/32 marked "Completed" for Mid-Year are as real
+  as they claim, same pattern as Development Plan turned out not to be.
 - 28-Aug-2026: **Quarterly Connect reminders built (BR-4.4)**. No separate
   worker/cron service exists in this deploy (deploy/render.yaml only
   defines api + frontend web services), so this runs in-process: an

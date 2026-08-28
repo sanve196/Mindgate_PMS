@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -19,6 +19,7 @@ import NineBoxPage from './pages/NineBoxPage';
 import MyGrowthPage from './pages/MyGrowthPage';
 import KraOrgOverviewPage from './pages/KraOrgOverviewPage';
 import AnnualReviewPage from './pages/AnnualReviewPage';
+import PulseCheckPage from './pages/PulseCheckPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -27,6 +28,7 @@ const NAV = [
     { to: '/my/rating', label: 'My Rating', icon: Star },
     { to: '/my/growth', label: 'My Growth', icon: TrendingUp },
     { to: '/my/annual-review', label: 'Annual Review', icon: Award },
+    { to: '/my/pulse-check', label: 'Pulse Check', icon: Heart },
   ]},
   { group: 'Team', items: [
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
@@ -94,6 +96,7 @@ export default function App() {
             <Route path="/my/rating" element={<MyRatingPage />} />
             <Route path="/my/growth" element={<MyGrowthPage />} />
             <Route path="/my/annual-review" element={<AnnualReviewPage />} />
+            <Route path="/my/pulse-check" element={<PulseCheckPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
             <Route path="/hod" element={<HodQueuePage />} />
             <Route path="/pip" element={<PIPPage />} />

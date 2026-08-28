@@ -484,6 +484,52 @@ router.post('/my/self-appraisal/submit', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- Mid-Year 7-Parameter Pulse Check (BRD Fig. 7b) -----------
+// Self-only, informational, deliberately isolated from the Annual
+// Review's 7-parameter engine (migrations/011-pulse-check.js explains
+// why it's a separate table). No submit/approval step — "for their own
+// reference" means there is nothing to route anywhere. Available only on
+// a midyear cycle; the parameters/weights shown are the same
+// pms.review_parameters HR configures for Annual, since Fig. 7b shows
+// "the same 7 Organisational Drivers that will be formally scored at
+// year-end" — but scoring here writes only to pms.pulse_checks, never to
+// manager_evaluations or anything the Annual Review reads.
+router.get('/my/pulse-check', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req), 'midyear');
+    if (!c) return res.json({ cycle: null, parameters: [], scores: {} });
+    const params = (await db.query(`SELECT id, name, weight_pct, sort_order FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [T(req)])).rows;
+    const scored = (await db.query(`SELECT parameter_id, score FROM pms.pulse_checks WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, req.user.id])).rows;
+    const scores = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
+    const answered = Object.keys(scores).length;
+    const selfAverage = answered ? Math.round((Object.values(scores).reduce((s, v) => s + v, 0) / answered) * 10) / 10 : null;
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, parameters: params, scores, self_average: selfAverage, note: 'Informational only — this does not feed your Annual Review score.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/my/pulse-check', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req), 'midyear');
+    if (!c) return res.status(409).json({ error: 'No active mid-year cycle' });
+    const { scores } = req.body || {};
+    if (!scores || typeof scores !== 'object') return res.status(400).json({ error: 'scores object required, e.g. {"<parameter_id>": 4}' });
+    const params = (await db.query(`SELECT id FROM pms.review_parameters WHERE tenant_id=$1 AND active=true`, [T(req)])).rows;
+    const validIds = new Set(params.map((p) => p.id));
+    for (const [pid, val] of Object.entries(scores)) {
+      if (!validIds.has(pid)) return res.status(400).json({ error: `unknown parameter_id: ${pid}` });
+      const n = Number(val);
+      if (Number.isNaN(n) || n < 1 || n > 5) return res.status(400).json({ error: `score for ${pid} must be a number between 1 and 5` });
+    }
+    for (const [pid, val] of Object.entries(scores)) {
+      await db.query(
+        `INSERT INTO pms.pulse_checks (tenant_id, cycle_id, employee_id, parameter_id, score) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (cycle_id, employee_id, parameter_id) DO UPDATE SET score=EXCLUDED.score, updated_at=now()`,
+        [T(req), c.id, req.user.id, pid, Number(val)]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- Manager & HOD evaluation ----------------------------------
 router.get('/team/evaluations', async (req, res) => {
   try {
