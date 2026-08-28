@@ -32,7 +32,7 @@ const NAV = [
   ]},
   { group: 'Team', items: [
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
-    { to: '/hod', label: 'HOD Review', icon: Landmark },
+    { to: '/hod', label: 'Delivery Head Review', icon: Landmark },
     { to: '/pip', label: 'Improvement Plans', icon: ShieldAlert },
   ]},
   { group: 'HR Admin', items: [

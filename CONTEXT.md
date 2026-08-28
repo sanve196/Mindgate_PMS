@@ -14,6 +14,27 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Delivery Head relabeling done (BR-8.1)**. This was
+  flagged in an earlier session as a naming-only fix since the feature
+  itself (extra approval layer above the manager, before HR calibration)
+  was already fully built under the internal name "HOD". On closer look
+  this session, "HOD" turned out to appear in nearly every file in the
+  codebase — but almost all of those are internal identifiers: the
+  hod_eval PHASE VALUE persisted in pms.cycles.phase, the pms_hod
+  PERMISSION STRING persisted in core.role_permissions, and the
+  pms.hod_evaluations table/column names. Renaming any of those would
+  need a real data migration for existing rows and change the API
+  contract, for zero user-visible benefit — so they were deliberately
+  left untouched. Only the actual DISPLAYED strings were changed to say
+  "Delivery Head": App.jsx nav label, HodQueuePage.jsx's heading/column
+  header/empty-state text, CalibrationPage.jsx's column header,
+  utils/api.jsx's phaseLabel() (the phase stepper shown throughout the
+  app), and one backend error message users can see directly
+  ("Delivery Head evaluation is not open"). Verified: full backend test
+  suite unaffected (no test asserted on the old exact string), clean
+  frontend production build, and a live check confirming the internal
+  /pms/hod/queue route and its response shape are completely unchanged.
+  84/84 tests pass with DB attached.
 - 28-Aug-2026: **Mid-Year 7-Parameter Pulse Check built (BRD Fig. 7b)**.
   "Employees complete a pulse check on their own experience, for their own
   reference... informational only, does not feed the Annual Review

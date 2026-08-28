@@ -12,7 +12,7 @@ export default function HodQueuePage() {
   return (
     <div className="space-y-4 max-w-4xl">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-bold">HOD Review</h2>
+        <h2 className="text-lg font-bold">Delivery Head Review</h2>
         <span className={`chip ${phaseColor(data.cycle.phase)}`}>{data.cycle.name} · {phaseLabel(data.cycle.phase)}</span>
         {data.departments?.length > 0 && <span className="text-xs text-slate-400">departments: {data.departments.join(', ')}</span>}
       </div>
@@ -20,11 +20,11 @@ export default function HodQueuePage() {
         <table className="w-full text-xs">
           <thead className="bg-stone-50 text-[10px] uppercase tracking-wide text-slate-500">
             <tr><th className="text-left px-3 py-2">Employee</th><th className="text-left px-3 py-2">Dept</th>
-              <th className="text-right px-3 py-2">Manager rating</th><th className="text-right px-3 py-2">HOD rating</th><th className="px-3 py-2" /></tr>
+              <th className="text-right px-3 py-2">Manager rating</th><th className="text-right px-3 py-2">Delivery Head rating</th><th className="px-3 py-2" /></tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
             {data.queue.map(q => <Row key={q.employee_id} q={q} editable={editable} reload={load} />)}
-            {!data.queue.length && <tr><td colSpan={5} className="p-6 text-center text-slate-400">Nothing awaiting HOD review — manager evaluations feed this queue as they are submitted.</td></tr>}
+            {!data.queue.length && <tr><td colSpan={5} className="p-6 text-center text-slate-400">Nothing awaiting Delivery Head review — manager evaluations feed this queue as they are submitted.</td></tr>}
           </tbody>
         </table>
       </div>

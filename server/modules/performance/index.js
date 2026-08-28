@@ -748,7 +748,7 @@ router.put('/hod/queue/:employeeId', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_hod'))) return res.status(403).json({ error: "Requires 'pms_hod'" });
     const c = await activeCycle(T(req));
-    if (!c || !pm.phaseAllows(c.phase, 'hod_edit')) return res.status(409).json({ error: `HOD evaluation is not open (phase: ${c ? c.phase : 'none'})` });
+    if (!c || !pm.phaseAllows(c.phase, 'hod_edit')) return res.status(409).json({ error: `Delivery Head evaluation is not open (phase: ${c ? c.phase : 'none'})` });
     const { overall_rating, comment, submit } = req.body || {};
     await db.query(
       `INSERT INTO pms.hod_evaluations (tenant_id, cycle_id, employee_id, hod_id, overall_rating, comment, status, submitted_at)
