@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -12,6 +12,7 @@ import MyRatingPage from './pages/MyRatingPage';
 import EngagementPage from './pages/EngagementPage';
 import PeopleHubPage from './pages/PeopleHubPage';
 import DirectoryPage from './pages/DirectoryPage';
+import PIPPage from './pages/PIPPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -22,6 +23,7 @@ const NAV = [
   { group: 'Team', items: [
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
     { to: '/hod', label: 'HOD Review', icon: Landmark },
+    { to: '/pip', label: 'Improvement Plans', icon: ShieldAlert },
   ]},
   { group: 'HR Admin', items: [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
@@ -78,6 +80,7 @@ export default function App() {
             <Route path="/my/rating" element={<MyRatingPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
             <Route path="/hod" element={<HodQueuePage />} />
+            <Route path="/pip" element={<PIPPage />} />
             <Route path="/admin/cycles" element={<CycleAdminPage />} />
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<DirectoryPage />} />

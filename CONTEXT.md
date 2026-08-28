@@ -14,6 +14,30 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **PIP module built (BR-7.1 auto-trigger + BR-7.2 weekly
+  tracking through to closure)**. pms.pip_records existed since migration
+  003 but had zero routes — nothing had ever written to it. Added:
+  migration 006 (pip_threshold column on pms.cycles, pms.pip_weekly_entries
+  table, unique index for idempotency, closed_reason column); auto-trigger
+  wired into POST /publish (opens a PIP when final_rating < cycle's
+  pip_threshold, ON CONFLICT DO NOTHING so re-publish never duplicates);
+  full CRUD (GET /pip, GET /pip/:id, PUT /pip/:id, POST /pip/:id/entries)
+  with employee=read-only-own, manager-of/HR=read+write, closing requires
+  a closed_reason, closed PIPs reject further entries. Frontend: new
+  PIPPage.jsx (nav: Team > Improvement Plans), wired into App.jsx.
+  RATING-SCALE MAPPING DECISION (documented in migrations/006-pip.js):
+  the BRD/plan describe the threshold in letter grades ("below B+") but
+  the actual schema is numeric 1-5 with English labels — there is no
+  letter-grade column anywhere. Used a configurable numeric threshold
+  (default 3.0, i.e. below "Meets Expectations") as the closest reading;
+  this is a judgment call to confirm with client HR during UAT, same as
+  the plan itself flags. Same mapping question will recur for Super 50's
+  "3 consecutive A/A+" — worth deciding once, consistently, when that's
+  built next.
+  test/pip.test.js: full lifecycle integration test (real Postgres, skips
+  cleanly without DATABASE_URL) — auto-trigger, permission split, mandatory
+  closure reason, post-closure lock, idempotent re-publish. 30/30 pass
+  with DB attached (27/30, 3 skipped, without).
 - 28-Aug-2026: **Ran against a real Postgres for the first time** (previously
   only ever tested against in-memory/no-DB unit tests). Migrations 001-005
   all run clean start-to-finish on Postgres 16. Found and fixed two real

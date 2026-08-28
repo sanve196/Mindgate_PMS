@@ -44,18 +44,36 @@ router.get('/cycles', async (req, res) => {
 router.post('/cycles', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
-    const { name, fiscal_year, cycle_type, rating_scale, bell_curve, opens_at, closes_at } = req.body || {};
+    const { name, fiscal_year, cycle_type, rating_scale, bell_curve, opens_at, closes_at, pip_threshold } = req.body || {};
     if (!name || !fiscal_year) return res.status(400).json({ error: 'name and fiscal_year required' });
     const r = await db.query(
-      `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, rating_scale, bell_curve, opens_at, closes_at, created_by)
-       VALUES ($1,$2,$3,COALESCE($4,'annual'),COALESCE($5,DEFAULT),COALESCE($6,DEFAULT),$7,$8,$9) RETURNING *`
+      `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, rating_scale, bell_curve, opens_at, closes_at, pip_threshold, created_by)
+       VALUES ($1,$2,$3,COALESCE($4,'annual'),COALESCE($5,DEFAULT),COALESCE($6,DEFAULT),$7,$8,COALESCE($9,DEFAULT),$10) RETURNING *`
         .replace('COALESCE($5,DEFAULT)', `COALESCE($5, '[{"value":1,"label":"Needs Improvement"},{"value":2,"label":"Developing"},{"value":3,"label":"Meets Expectations"},{"value":4,"label":"Exceeds"},{"value":5,"label":"Outstanding"}]'::jsonb)`)
-        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '{"1":5,"2":15,"3":55,"4":20,"5":5}'::jsonb)`),
+        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '{"1":5,"2":15,"3":55,"4":20,"5":5}'::jsonb)`)
+        .replace('COALESCE($9,DEFAULT)', `COALESCE($9, 3.0)`),
       [T(req), name, fiscal_year, cycle_type || null, rating_scale ? JSON.stringify(rating_scale) : null,
-       bell_curve ? JSON.stringify(bell_curve) : null, opens_at || null, closes_at || null, req.user.email]);
+       bell_curve ? JSON.stringify(bell_curve) : null, opens_at || null, closes_at || null, pip_threshold ?? null, req.user.email]);
     audit(req, 'CYCLE_CREATED', r.rows[0].id, null, { name, fiscal_year });
     res.json({ ok: true, cycle: r.rows[0] });
   } catch (e) { logger.error('cycle create', { error: e.message }); res.status(500).json({ error: e.message }); }
+});
+
+// BR-7.1: threshold is configurable by HR, per cycle — see migrations/006-pip.js
+// for why this is a plain number on the existing 1-5 scale rather than a
+// letter grade. Editable any time (not phase-gated) since the project plan
+// expects it to be revisited during UAT once real test data exists.
+router.put('/cycles/:id/pip-threshold', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const { threshold } = req.body || {};
+    if (typeof threshold !== 'number' || threshold <= 0) return res.status(400).json({ error: 'threshold (positive number) required' });
+    const r = await db.query(`UPDATE pms.cycles SET pip_threshold=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3 RETURNING id, pip_threshold`,
+      [threshold, req.params.id, T(req)]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'cycle not found' });
+    audit(req, 'PIP_THRESHOLD_SET', req.params.id, null, { threshold });
+    res.json({ ok: true, cycle_id: r.rows[0].id, pip_threshold: r.rows[0].pip_threshold });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Phase transitions: advance / rollback / cancel — audited, machine-checked.
@@ -400,7 +418,7 @@ router.post('/publish', async (req, res) => {
         WHERE e.tenant_id=$2`, [c.id, T(req)])).rows;
     const scale = Array.isArray(c.rating_scale) ? c.rating_scale : [];
     const label = (v) => { const m = scale.find(s => Math.round(v) === s.value); return m ? m.label : null; };
-    let published = 0; const failures = [];
+    let published = 0; let pipsOpened = 0; const failures = [];
     for (const r of rows) {
       if (r.final_rating == null) { failures.push({ employee_id: r.employee_id, reason: 'no rating at any layer' }); continue; }
       try {
@@ -415,12 +433,27 @@ router.post('/publish', async (req, res) => {
         await db.query(
           `INSERT INTO pms.closure_letters (tenant_id, cycle_id, employee_id) VALUES ($1,$2,$3)
            ON CONFLICT (cycle_id, employee_id) DO NOTHING`, [T(req), c.id, r.employee_id]);
+        // BR-7.1: automatic PIP trigger below the cycle's configured threshold.
+        // ON CONFLICT DO NOTHING (unique on tenant/employee/cycle, migration
+        // 006) makes this safe if publish is re-run — it won't reopen or
+        // duplicate a PIP that already exists for this cycle.
+        if (Number(r.final_rating) < Number(c.pip_threshold)) {
+          const pipR = await db.query(
+            `INSERT INTO pms.pip_records (tenant_id, employee_id, cycle_id, status, opened_by)
+             VALUES ($1,$2,$3,'open',$4) ON CONFLICT (tenant_id, employee_id, cycle_id) DO NOTHING RETURNING id`,
+            [T(req), r.employee_id, c.id, `system:publish (${req.user.email})`]);
+          if (pipR.rows[0]) {
+            pipsOpened++;
+            await notify(T(req), r.employee_id, 'pip_opened', `A Performance Improvement Plan has been opened for ${c.name}`, null, '/pms/my-rating');
+            audit(req, 'PIP_AUTO_OPENED', c.id, r.employee_id, { final_rating: r.final_rating, threshold: c.pip_threshold });
+          }
+        }
         await notify(T(req), r.employee_id, 'rating_published', `Your ${c.name} rating is published`, null, '/pms/my-rating');
         published++;
       } catch (e) { failures.push({ employee_id: r.employee_id, reason: e.message }); }
     }
-    audit(req, 'CYCLE_PUBLISHED', c.id, null, { published, failed: failures.length });
-    res.json({ ok: true, published, failures });
+    audit(req, 'CYCLE_PUBLISHED', c.id, null, { published, failed: failures.length, pips_opened: pipsOpened });
+    res.json({ ok: true, published, pips_opened: pipsOpened, failures });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -466,6 +499,92 @@ router.get('/connects', async (req, res) => {
         ORDER BY cn.held_at DESC LIMIT 100`,
       mine ? [T(req), req.user.id, mine] : [T(req), req.user.id]);
     res.json({ connects: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------- PIP (Performance Improvement Plan) — BR-7.1/BR-7.2 -------
+// Auto-opened at /publish (above) when final_rating < cycle.pip_threshold.
+// Writers are the employee's manager or HR (BRD Owner/Approver column);
+// the employee has read-only visibility into their own PIP and its weekly
+// entries — matching "visible to the employee, manager, and HR."
+async function isManagerOfOrAdmin(req, employeeId) {
+  if (await hasPermission(req.user, 'pms_admin')) return true;
+  const r = await db.query(`SELECT 1 FROM core.employees WHERE id=$1 AND tenant_id=$2 AND manager_id=$3`,
+    [employeeId, T(req), req.user.id]);
+  return !!r.rows[0];
+}
+
+router.get('/pip', async (req, res) => {
+  try {
+    const isAdmin = await hasPermission(req.user, 'pms_admin');
+    const { employee_id, status } = req.query;
+    const params = [T(req)]; const clauses = ['p.tenant_id=$1'];
+    if (!isAdmin) {
+      params.push(req.user.id);
+      clauses.push(`(p.employee_id=$${params.length} OR EXISTS (SELECT 1 FROM core.employees me WHERE me.id=p.employee_id AND me.manager_id=$${params.length}))`);
+    }
+    if (employee_id) { params.push(employee_id); clauses.push(`p.employee_id=$${params.length}`); }
+    if (status) { params.push(status); clauses.push(`p.status=$${params.length}`); }
+    const r = await db.query(
+      `SELECT p.*, e.name AS employee_name, e.department, c.name AS cycle_name
+         FROM pms.pip_records p JOIN core.employees e ON e.id=p.employee_id
+         LEFT JOIN pms.cycles c ON c.id=p.cycle_id
+        WHERE ${clauses.join(' AND ')} ORDER BY p.opened_at DESC`, params);
+    res.json({ pips: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/pip/:id', async (req, res) => {
+  try {
+    const p = (await db.query(`SELECT p.*, e.name AS employee_name FROM pms.pip_records p JOIN core.employees e ON e.id=p.employee_id
+                                 WHERE p.id=$1 AND p.tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!p) return res.status(404).json({ error: 'PIP not found' });
+    const isSelf = p.employee_id === req.user.id;
+    if (!isSelf && !(await isManagerOfOrAdmin(req, p.employee_id))) return res.status(403).json({ error: 'Not visible to you' });
+    const entries = (await db.query(
+      `SELECT id, week_ending, notes, submitted_by, created_at FROM pms.pip_weekly_entries
+        WHERE pip_id=$1 ORDER BY week_ending DESC`, [p.id])).rows;
+    res.json({ pip: p, weekly_entries: entries });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manager/HR only — plan text, and status transitions through to a
+// documented closure (BR-7.2 "through to a documented closure": closing
+// requires closed_reason, not just a status flip).
+router.put('/pip/:id', async (req, res) => {
+  try {
+    const p = (await db.query(`SELECT * FROM pms.pip_records WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!p) return res.status(404).json({ error: 'PIP not found' });
+    if (!(await isManagerOfOrAdmin(req, p.employee_id))) return res.status(403).json({ error: 'Requires being this employee\'s manager, or pms_admin' });
+    const { plan, status, closed_reason } = req.body || {};
+    const VALID = ['open', 'in_progress', 'closed_successful', 'closed_unsuccessful'];
+    if (status && !VALID.includes(status)) return res.status(400).json({ error: `status must be one of: ${VALID.join(', ')}` });
+    if (status && status.startsWith('closed') && !closed_reason) return res.status(400).json({ error: 'closed_reason required to close a PIP' });
+    const closing = status && status.startsWith('closed');
+    await db.query(
+      `UPDATE pms.pip_records SET plan=COALESCE($1,plan), status=COALESCE($2,status),
+              closed_reason=COALESCE($3,closed_reason), closed_at=CASE WHEN $4 THEN now() ELSE closed_at END
+        WHERE id=$5`, [plan || null, status || null, closed_reason || null, closing, p.id]);
+    audit(req, closing ? 'PIP_CLOSED' : 'PIP_UPDATED', p.cycle_id, p.employee_id, { status, closed_reason });
+    if (closing) await notify(T(req), p.employee_id, 'pip_closed', `Your Performance Improvement Plan has been closed (${status})`, null, '/pms/my-rating');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/pip/:id/entries', async (req, res) => {
+  try {
+    const p = (await db.query(`SELECT * FROM pms.pip_records WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!p) return res.status(404).json({ error: 'PIP not found' });
+    if (!(await isManagerOfOrAdmin(req, p.employee_id))) return res.status(403).json({ error: 'Requires being this employee\'s manager, or pms_admin' });
+    if (p.status.startsWith('closed')) return res.status(409).json({ error: 'PIP is closed — no further entries' });
+    const { week_ending, notes } = req.body || {};
+    if (!week_ending || !notes) return res.status(400).json({ error: 'week_ending and notes required' });
+    await db.query(
+      `INSERT INTO pms.pip_weekly_entries (tenant_id, pip_id, week_ending, notes, submitted_by) VALUES ($1,$2,$3,$4,$5)`,
+      [T(req), p.id, week_ending, notes, req.user.email]);
+    if (p.status === 'open') await db.query(`UPDATE pms.pip_records SET status='in_progress' WHERE id=$1`, [p.id]);
+    await notify(T(req), p.employee_id, 'pip_entry_added', 'A new weekly note was added to your Performance Improvement Plan', null, '/pms/my-rating');
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
