@@ -14,6 +14,31 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Found and fixed a real deploy-breaking gap before it hit
+  production**: the frontend called relative /api/v1 paths everywhere
+  (utils/api.jsx's api() helper, plus 4 hardcoded <a href> download links
+  for evidence/closure-letters/GDPR export). That works in local dev only
+  because vite.config.js's dev-server proxy forwards /api to
+  localhost:8080 — but Render deploys the frontend as a static site, a
+  SEPARATE service from the API, with its own domain. Every API call in
+  production would have hit the static site's own domain and 404'd — the
+  app would have loaded (HTML/CSS/JS all served fine) but nothing would
+  have worked. Fixed: utils/api.jsx now exports API_BASE, resolved from
+  import.meta.env.VITE_API_URL (an absolute https://.../api/v1 URL) when
+  set, falling back to the old relative /api/v1 for local dev. Every one
+  of the 5 places that previously hardcoded /api/v1 now imports and uses
+  this one constant. deploy/render.yaml's frontend service gets
+  VITE_API_URL injected at BUILD time (Vite bakes env vars into the
+  static bundle at build, not runtime) via Render's fromService blueprint
+  feature, pointed at the api service's host. Verified by building the
+  frontend BOTH ways (with and without VITE_API_URL set) and grepping the
+  actual built JS bundle to confirm each one contains the correct URL —
+  not just trusting the build succeeded.
+  Also: pushed the full repo (all commits, complete history) to a second
+  remote, https://github.com/sanve196/Mindgate_PMS — this is now the repo
+  used for the actual Render deployment. Verified via GitHub API that the
+  new repo's commit count, latest commit SHA, and file tree (including
+  all 13 migrations) match the original exactly.
 - 28-Aug-2026: **Closed the 3 concrete remaining gaps from the last audit
   pass** (calendar integration stays deliberately deferred; broad "GDPR
   compliance" and "bi-directional HRMS" aren't fully closeable without

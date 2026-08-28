@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Trash2, Download } from 'lucide-react';
-import { api, phaseLabel, phaseColor } from '../utils/api';
+import { api, phaseLabel, phaseColor, API_BASE } from '../utils/api';
 
 export default function SelfAppraisalPage() {
   const [data, setData] = useState(null);
@@ -106,7 +106,7 @@ function EvidenceSection({ editable }) {
         <div key={f.id} className="flex items-center justify-between text-xs bg-stone-50 rounded-lg px-2 py-1.5">
           <span className="flex items-center gap-1"><Paperclip size={12} className="text-slate-400" />{f.filename} <span className="text-slate-400">({Math.round(f.file_size / 1024)} KB)</span></span>
           <span className="flex items-center gap-1">
-            <a href={`/api/v1/pms/evidence/${f.id}/download?token=${token}`} className="btn-sec !p-1" target="_blank" rel="noreferrer"><Download size={12} /></a>
+            <a href={`${API_BASE}/pms/evidence/${f.id}/download?token=${token}`} className="btn-sec !p-1" target="_blank" rel="noreferrer"><Download size={12} /></a>
             {editable && <button className="btn-sec !p-1" onClick={() => remove(f.id)}><Trash2 size={12} /></button>}
           </span>
         </div>

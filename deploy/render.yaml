@@ -22,5 +22,18 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    envVars:
+      # Injected at BUILD time (Vite bakes env vars into the static bundle
+      # at build, not runtime) — the api service's Render host, so
+      # production API calls go to the real backend domain instead of a
+      # relative path that would hit this static site's own domain. See
+      # frontend/src/utils/api.jsx's API_BASE for the client-side half of
+      # this. Local dev needs no equivalent — vite.config.js's dev-server
+      # proxy handles relative /api paths during `npm run dev`.
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: agentic-pms-api
+          property: host
 databases:
   - name: agentic-pms-db

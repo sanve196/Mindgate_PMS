@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Sparkles, FileDown, CheckCircle2 } from 'lucide-react';
-import { api, DraftBadge } from '../utils/api';
+import { api, DraftBadge, API_BASE } from '../utils/api';
 
 export default function ClosureLettersPage() {
   const [data, setData] = useState(null);
@@ -60,7 +60,7 @@ function LetterRow({ l, reload }) {
         {l.generated ? (
           <div className="flex items-center gap-2">
             <span className="chip bg-emerald-100 text-emerald-700 flex items-center gap-1"><CheckCircle2 size={12} />Generated</span>
-            <a href={`/api/v1/pms/closure-letters/${l.employee_id}/${l.cycle_id}/download?token=${token}`} target="_blank" rel="noreferrer" className="btn-sec !p-1.5"><FileDown size={14} /></a>
+            <a href={`${API_BASE}/pms/closure-letters/${l.employee_id}/${l.cycle_id}/download?token=${token}`} target="_blank" rel="noreferrer" className="btn-sec !p-1.5"><FileDown size={14} /></a>
           </div>
         ) : (
           <button className="btn-sec" disabled={busy} onClick={askDraft}><Sparkles size={13} className="inline mr-1 text-amber-500" />{busy ? 'Drafting…' : 'Draft with AI'}</button>

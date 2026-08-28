@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, FileText } from 'lucide-react';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 
 export default function MyRatingPage() {
   const [rows, setRows] = useState(null); const [err, setErr] = useState(null);
@@ -18,7 +18,7 @@ export default function MyRatingPage() {
               <div><p className="text-sm font-semibold">{r.cycle_name}</p><p className="text-xs text-slate-400">{r.fiscal_year} · published {new Date(r.published_at).toLocaleDateString('en-IN')}</p></div>
               <div className="flex items-center gap-3">
                 <div className="text-right"><p className="text-xl font-bold">{r.final_rating}</p><p className="text-xs text-slate-500">{r.rating_label || ''}</p></div>
-                <a href={`/api/v1/pms/closure-letters/me/${r.cycle_id}/download?token=${token}`} target="_blank" rel="noreferrer" className="btn-sec !p-1.5" title="Download closure letter">
+                <a href={`${API_BASE}/pms/closure-letters/me/${r.cycle_id}/download?token=${token}`} target="_blank" rel="noreferrer" className="btn-sec !p-1.5" title="Download closure letter">
                   <FileText size={14} />
                 </a>
               </div>
@@ -27,7 +27,7 @@ export default function MyRatingPage() {
         </div>
       )}
       <p className="text-[11px] text-slate-400">Questions about a rating? Raise an appraisal query in People Hub — it reaches HR with a tracked thread.</p>
-      <a href={`/api/v1/gdpr/export?token=${token}`} className="btn-sec inline-flex items-center gap-1 !text-xs">
+      <a href={`${API_BASE}/gdpr/export?token=${token}`} className="btn-sec inline-flex items-center gap-1 !text-xs">
         <Download size={12} />Download all my data (GDPR export)
       </a>
     </div>

@@ -1,7 +1,19 @@
 // Shared API client + tiny helpers for the product pages.
+//
+// In local dev, relative /api/v1 paths work via Vite's dev-server proxy
+// (vite.config.js). In production on Render, the frontend deploys as a
+// SEPARATE static site from the API service — a relative path would hit
+// the static site's own domain and 404. VITE_API_URL (set at build time
+// via render.yaml's fromService reference to the api service's host) is
+// how the built static bundle knows the API's real domain. Every part of
+// the app — the api() helper AND the handful of plain <a href> download
+// links (evidence, closure letters, GDPR export) — uses this same
+// constant, so there is one place this logic lives, not four.
+export const API_BASE = import.meta.env.VITE_API_URL ? `https://${import.meta.env.VITE_API_URL}/api/v1` : '/api/v1';
+
 export const api = async (path, opts = {}) => {
   const token = localStorage.getItem('apms_token');
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
     headers: {
       ...(opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
