@@ -530,6 +530,49 @@ router.put('/my/pulse-check', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- Mid-Year Review consolidation — BR-5.1/5.2 ---------------
+// "Consolidates progress against KRAs and the development plan"
+// (BR-5.1) + "requires independent sign-off from both the employee and
+// the manager, with status tracked as Pending/Signed for each party"
+// (BR-5.2). The editing itself already existed generically (self_edit/
+// manager_edit phase gates work for any cycle_type, so self-appraisal
+// and manager-evaluation entry already function during a midyear cycle)
+// — what was missing was a place either party could see BOTH sign-off
+// statuses side by side, which this adds without duplicating any of the
+// existing editing routes.
+async function buildMidYearSummary(tenantId, employeeId, cycleId) {
+  const self = (await db.query(`SELECT status, overall_self_rating, went_well, could_improve FROM pms.self_appraisals WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  const mgr = (await db.query(`SELECT status, overall_rating, strengths, improvement_areas FROM pms.manager_evaluations WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  const signOff = (row) => (row && row.status === 'submitted' ? 'Signed' : 'Pending');
+  return {
+    self: self ? { ...self, sign_off: signOff(self) } : { status: 'not_started', sign_off: 'Pending' },
+    manager: mgr ? { ...mgr, sign_off: signOff(mgr) } : { status: 'not_started', sign_off: 'Pending' },
+  };
+}
+
+router.get('/my/midyear-review', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req), 'midyear');
+    if (!c) return res.json({ cycle: null });
+    const summary = await buildMidYearSummary(T(req), req.user.id, c.id);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, ...summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/team/midyear-review/:employeeId', async (req, res) => {
+  try {
+    const emp = (await db.query(`SELECT id, name, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'pms_hod'))) {
+      return res.status(403).json({ error: 'Not your report' });
+    }
+    const c = await activeCycle(T(req), 'midyear');
+    if (!c) return res.json({ cycle: null, employee: { id: emp.id, name: emp.name } });
+    const summary = await buildMidYearSummary(T(req), emp.id, c.id);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, employee: { id: emp.id, name: emp.name }, ...summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- Manager & HOD evaluation ----------------------------------
 router.get('/team/evaluations', async (req, res) => {
   try {

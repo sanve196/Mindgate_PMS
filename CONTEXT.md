@@ -14,6 +14,44 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Mid-Year Review dual sign-off consolidation built
+  (BR-5.1/5.2)**. The editing itself already worked generically (self_edit/
+  manager_edit phase gates aren't cycle_type-restricted, so self-appraisal
+  and manager-evaluation entry already functioned during a midyear
+  cycle) — what was missing, flagged in an earlier session, was anywhere
+  either party could see BOTH sign-off statuses ("Pending"/"Signed" per
+  BR-5.2's exact wording) side by side. buildMidYearSummary() in
+  modules/performance/index.js is a small, focused consolidation (far
+  simpler than Annual Review's — BR-5 doesn't ask for KRA/dev-plan
+  aggregation, just the dual status + each side's rating/narrative). New
+  GET /pms/my/midyear-review (self) and GET /pms/team/midyear-review/
+  :employeeId (manager/HOD/HR, same 403 guard pattern used throughout).
+  Frontend: new MidYearReviewPage.jsx (nav: My Performance > Mid-Year
+  Review) — two side-by-side cards (yours/manager's), Signed/Pending
+  badge, narrative fields once available, a link into the existing
+  Self-Appraisal page to actually edit (deliberately not re-implementing
+  that editing UI a second time). Verified with a clean production
+  build. test/midyear-review.test.js: 3 integration tests (dual status
+  correctly differentiates Signed vs Pending; manager can view a report's
+  status, unrelated employee 403s; a brand-new employee gets
+  not_started/Pending rather than an error). All 3 passed on the first
+  run. 87/87 tests pass with DB attached (48/87, 39 skipped, without).
+- 28-Aug-2026: **Calendar/meeting-tool integration — DEFERRED, by
+  decision, not oversight.** This is the last item from the original
+  11-point roadmap ("draw discussion points from calendar and meeting
+  tools, with consent"). Asked which provider (Google Calendar,
+  Microsoft 365/Outlook, or a generic pluggable interface) — the answer
+  was "don't know yet, decide later." Correctly NOT guessed at: picking a
+  provider commits to a specific OAuth flow, API surface, and data model
+  that would be expensive to redo if wrong. What IS already in place and
+  ready for whichever provider gets chosen: the full consent-gate
+  infrastructure (core/consent.js, built earlier this session) and the
+  meeting_based flag on pms.connects that already 403s without explicit
+  employee consent — so whenever a provider is chosen, the integration
+  slots into an existing, tested safety boundary rather than needing one
+  built from scratch. This is the one item NOT closed out this session;
+  everything else in the original plan (44 System Build tasks) has now
+  been verified, fixed, or built.
 - 28-Aug-2026: **Delivery Head relabeling done (BR-8.1)**. This was
   flagged in an earlier session as a naming-only fix since the feature
   itself (extra approval layer above the manager, before HR calibration)
