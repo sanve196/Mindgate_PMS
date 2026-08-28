@@ -1112,6 +1112,24 @@ router.get('/connects', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// BR-4.3: "Managers confirm and sign off each logged conversation."
+// Sign-off is a distinct, explicit action from creating the log — a
+// manager can log now and sign off after reviewing (e.g. after editing
+// notes or reading the AI insights below), rather than the act of
+// creation being silently treated as sign-off.
+router.post('/connects/:id/sign-off', async (req, res) => {
+  try {
+    const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!cn) return res.status(404).json({ error: 'connect not found' });
+    if (cn.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your connect to sign off' });
+    if (cn.signed_off) return res.status(409).json({ error: 'already signed off' });
+    await db.query(`UPDATE pms.connects SET signed_off=true, signed_off_at=now() WHERE id=$1`, [cn.id]);
+    audit(req, 'CONNECT_SIGNED_OFF', null, cn.employee_id, { connect_id: cn.id });
+    await notify(T(req), cn.employee_id, 'connect_signed_off', 'Your manager signed off your quarterly connect', null, '/pms');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- Quarterly Connect reminders — BR-4.4 ---------------------
 // No separate worker/cron service exists in this deploy (see
 // migrations/010-connect-reminders.js), so this is triggered two ways:

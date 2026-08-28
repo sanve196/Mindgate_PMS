@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -21,6 +21,7 @@ import KraOrgOverviewPage from './pages/KraOrgOverviewPage';
 import AnnualReviewPage from './pages/AnnualReviewPage';
 import PulseCheckPage from './pages/PulseCheckPage';
 import MidYearReviewPage from './pages/MidYearReviewPage';
+import ConnectsPage from './pages/ConnectsPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -34,6 +35,7 @@ const NAV = [
   ]},
   { group: 'Team', items: [
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
+    { to: '/team/connects', label: 'Quarterly Connects', icon: MessageCircle },
     { to: '/hod', label: 'Delivery Head Review', icon: Landmark },
     { to: '/pip', label: 'Improvement Plans', icon: ShieldAlert },
   ]},
@@ -101,6 +103,7 @@ export default function App() {
             <Route path="/my/annual-review" element={<AnnualReviewPage />} />
             <Route path="/my/pulse-check" element={<PulseCheckPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
+            <Route path="/team/connects" element={<ConnectsPage />} />
             <Route path="/hod" element={<HodQueuePage />} />
             <Route path="/pip" element={<PIPPage />} />
             <Route path="/admin/cycles" element={<CycleAdminPage />} />

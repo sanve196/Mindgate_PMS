@@ -212,4 +212,47 @@ router.get('/drafts', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+// 6) Connect insights — BR-4.2: "The system summarises recurring themes,
+// sentiment and follow-up actions from logged conversations and links
+// them to the employee's KRAs." FOUND MISSING during a full BRD
+// re-audit, 28-Aug-2026 — a similarly-named engagement_themes feature
+// existed for anonymous SURVEY verbatims (#3 above), but nothing summarised
+// an individual employee's own 1-on-1 CONNECT notes, which is a distinct
+// requirement (attributed to a specific employee, not anonymous, and
+// explicitly links back to KRA ids already stored per connect).
+router.post('/connect-insights', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const { employee_id } = req.body || {};
+    if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+    const emp = (await db.query(`SELECT id, name, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [employee_id, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const connects = (await db.query(
+      `SELECT cn.held_at, cn.notes, cn.kra_ids FROM pms.connects cn
+        WHERE cn.tenant_id=$1 AND cn.employee_id=$2 AND cn.notes IS NOT NULL AND length(trim(cn.notes))>0
+        ORDER BY cn.held_at DESC LIMIT 8`, [T(req), employee_id])).rows;
+    if (!connects.length) return res.status(422).json({ error: 'No logged connects with notes to summarise yet' });
+    const kraIds = [...new Set(connects.flatMap((c) => c.kra_ids || []))];
+    const kras = kraIds.length ? (await db.query(`SELECT id, title FROM pms.kras WHERE id = ANY($1::uuid[])`, [kraIds])).rows : [];
+    const kraTitle = Object.fromEntries(kras.map((k) => [k.id, k.title]));
+    const input = {
+      employee: emp.name, connects_summarised: connects.length,
+      connects: connects.map((c) => ({ held_at: c.held_at, notes: c.notes, linked_kras: (c.kra_ids || []).map((id) => kraTitle[id]).filter(Boolean) })),
+    };
+    const out = await ai.narrate({
+      tenantId: T(req), kind: 'connect_insights', ref: { employee_id },
+      requestedBy: req.user.email, input, maxTokens: 1200,
+      system: `You summarise a manager's own logged 1-on-1 notes about ONE employee across recent
+Quarterly Connects. Identify recurring themes and overall sentiment trend, and suggest
+concrete follow-ups for the next connect. Where a theme relates to a linked KRA
+(given in the input), name it. Ground everything in the input; invent nothing.
+Never suggest or imply a numeric rating.
+Respond ONLY with JSON:
+{"themes":[{"name":"...","summary":"1-2 sentences","related_kra":"KRA title or null"}],"sentiment_trend":"one sentence","suggested_followups":["..."]}`,
+    });
+    res.json({ ok: true, ...out });
+  } catch (e) { fail(res, e); }
+});
+
 module.exports = { router };

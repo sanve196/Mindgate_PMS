@@ -14,6 +14,46 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Full BRD re-audit against actual code** (not prior notes)
+  — re-read the BRD/plan verbatim and grepped/read actual route files for
+  every BR item, rather than trusting CONTEXT.md's own earlier summaries.
+  Found and fixed 4 more genuine gaps:
+  1. **BR-4.3 (manager sign-off on connects) was NOT implemented** —
+     pms.connects had no status/sign-off column at all, just a plain log
+     insert. Fixed: migration 012 adds signed_off/signed_off_at; new
+     POST /pms/connects/:id/sign-off as an explicit action distinct from
+     creating the log (a manager can log now, sign off after review).
+  2. **BR-4.2 (AI theme/sentiment summary for connects, linked to KRAs)
+     confirmed still missing** — the existing engagement_themes feature
+     is for anonymous SURVEY verbatims, a different thing. Fixed: new
+     POST /agentic/connect-insights (6th agentic feature) summarises one
+     employee's own logged connect notes, links themes back to KRA ids
+     already stored per connect, never suggests a rating (same
+     stripRatingSuggestions safeguard as the other 5).
+  3. **BR-1.5 (KRA info auto-updates on HRMS manager/dept change) confirmed
+     still missing, now fixed** — pms.kra_sheets/pms.development_plans
+     snapshot manager_id once at creation and never got updated when
+     core.employees.manager_id changed via re-import. Fixed in
+     core/employees.js's loadEmployees(): a new Pass 3 propagates a
+     manager change to any STILL-OPEN cycle's KRA sheet/dev plan only —
+     closed-cycle records deliberately keep their original manager, so a
+     later reassignment doesn't silently rewrite audit history.
+  4. **No frontend page for Quarterly Connect existed at all** — BR-4.1
+     ("Build the 1-on-1 Log screen, Fig. 6") was marked Completed with
+     zero UI. Fixed: new ConnectsPage.jsx (nav: Team > Quarterly
+     Connects) — log a new connect, sign-off button, AI insights button
+     surfacing the new connect-insights feature above.
+  All four fixes verified with dedicated integration tests against real
+  Postgres (test/connect-signoff.test.js, test/connect-insights.test.js,
+  test/hrms-manager-sync.test.js — the last one specifically proving
+  closed-cycle history is NOT rewritten) plus a clean frontend production
+  build. 91/91 tests pass with DB attached (48/91, 43 skipped, without).
+  Everything else checked in this audit (KRA management, Development
+  Plan, Career Path, Mid-Year, Annual Review, 7-parameter engine, 9-Box,
+  Super 50, retention alerts, PIP, Delivery Head ordering via the phase
+  machine, consent gate, audit trail, AI human-approval safeguard) was
+  confirmed correctly implemented by reading the actual route code, not
+  assumed from memory.
 - 28-Aug-2026: **Mid-Year Review dual sign-off consolidation built
   (BR-5.1/5.2)**. The editing itself already worked generically (self_edit/
   manager_edit phase gates aren't cycle_type-restricted, so self-appraisal

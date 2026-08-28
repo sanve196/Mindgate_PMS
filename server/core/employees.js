@@ -235,6 +235,32 @@ async function loadEmployees(tenantId, rows) {
         await client.query(`UPDATE core.employees SET manager_id=NULL, updated_at=now() WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`, [tenantId, r.email]);
       }
     }
+    // Pass 3 (BR-1.5 — "KRA information should automatically update
+    // whenever there is a change in the HRMS, such as an employee
+    // changing their manager..."): propagate a manager change to any
+    // still-open cycle's KRA sheet and development plan. Only OPEN
+    // cycles (phase not closed/cancelled) are touched — a closed cycle's
+    // sheet keeps the manager who actually reviewed it at the time, for
+    // audit accuracy; that's history, not something a later reassignment
+    // should silently rewrite.
+    for (const r of rows) {
+      await client.query(
+        `UPDATE pms.kra_sheets ks SET manager_id = e.manager_id, updated_at = now()
+           FROM core.employees e, pms.cycles c
+          WHERE ks.employee_id = e.id AND ks.cycle_id = c.id
+            AND e.tenant_id=$1 AND LOWER(e.email)=LOWER($2)
+            AND c.phase NOT IN ('closed','cancelled')
+            AND ks.manager_id IS DISTINCT FROM e.manager_id`,
+        [tenantId, r.email]);
+      await client.query(
+        `UPDATE pms.development_plans dp SET manager_id = e.manager_id, updated_at = now()
+           FROM core.employees e, pms.cycles c
+          WHERE dp.employee_id = e.id AND dp.cycle_id = c.id
+            AND e.tenant_id=$1 AND LOWER(e.email)=LOWER($2)
+            AND c.phase NOT IN ('closed','cancelled')
+            AND dp.manager_id IS DISTINCT FROM e.manager_id`,
+        [tenantId, r.email]);
+    }
     await client.query('COMMIT');
     return { loaded: rows.length };
   } catch (e) {
@@ -295,4 +321,4 @@ router.post('/import', (req, res, next) => upload.single('file')(req, res, (err)
   } catch (e) { logger.error('employee import', { error: e.message }); res.status(500).json({ error: e.message }); }
 });
 
-module.exports = { router, validateEmployeeCsv, validateEmployeeXlsx, validateEmployeeRows, flexDate, parseCsv, detectFormat };
+module.exports = { router, validateEmployeeCsv, validateEmployeeXlsx, validateEmployeeRows, flexDate, parseCsv, detectFormat, loadEmployees };
