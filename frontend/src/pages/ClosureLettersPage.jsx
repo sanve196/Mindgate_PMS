@@ -9,16 +9,16 @@ export default function ClosureLettersPage() {
   useEffect(() => { load(); }, []);
 
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active cycle.</div>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
 
   return (
     <div className="space-y-4 max-w-4xl">
       <div>
         <h2 className="text-lg font-bold">Closure Letters</h2>
-        <p className="text-xs text-slate-400">{data.cycle.name} — draft with AI, review, then generate the branded PDF. Nothing is ever sent without your review.</p>
+        <p className="text-xs text-navy-400">{data.cycle.name} — draft with AI, review, then generate the branded PDF. Nothing is ever sent without your review.</p>
       </div>
-      {!data.letters.length && <div className="card p-8 text-center text-sm text-slate-400">No published ratings yet for this cycle — publish first.</div>}
+      {!data.letters.length && <div className="card p-8 text-center text-sm text-navy-400">No published ratings yet for this cycle — publish first.</div>}
       <div className="space-y-2">
         {data.letters.map(l => <LetterRow key={l.employee_id} l={l} reload={load} />)}
       </div>
@@ -55,7 +55,7 @@ function LetterRow({ l, reload }) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-semibold">{l.employee_name}</p>
-          <p className="text-xs text-slate-400">{l.final_rating} · {l.rating_label}</p>
+          <p className="text-xs text-navy-400">{l.final_rating} · {l.rating_label}</p>
         </div>
         {l.generated ? (
           <div className="flex items-center gap-2">
@@ -67,15 +67,15 @@ function LetterRow({ l, reload }) {
         )}
       </div>
       {open && draft && (
-        <div className="bg-slate-900 text-slate-100 rounded-lg p-3 text-xs space-y-2">
+        <div className="bg-navy-800 text-slate-100 rounded-lg p-3 text-xs space-y-2">
           <DraftBadge />
-          <textarea className="inp !bg-slate-800 !text-white !border-slate-600 w-full" rows={2} value={draft.salutation}
+          <textarea className="inp !bg-navy-700 !text-white !border-navy-600 w-full" rows={2} value={draft.salutation}
             onChange={e => setDraft(d => ({ ...d, salutation: e.target.value }))} />
           {draft.body_paragraphs.map((p, i) => (
-            <textarea key={i} className="inp !bg-slate-800 !text-white !border-slate-600 w-full" rows={3} value={p}
+            <textarea key={i} className="inp !bg-navy-700 !text-white !border-navy-600 w-full" rows={3} value={p}
               onChange={e => setDraft(d => ({ ...d, body_paragraphs: d.body_paragraphs.map((x, j) => j === i ? e.target.value : x) }))} />
           ))}
-          <textarea className="inp !bg-slate-800 !text-white !border-slate-600 w-full" rows={2} value={draft.closing_line}
+          <textarea className="inp !bg-navy-700 !text-white !border-navy-600 w-full" rows={2} value={draft.closing_line}
             onChange={e => setDraft(d => ({ ...d, closing_line: e.target.value }))} />
           <button className="btn-pri" disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate PDF'}</button>
         </div>

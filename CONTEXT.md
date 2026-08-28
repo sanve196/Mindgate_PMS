@@ -14,6 +14,61 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Full visual redesign to match the BRD's reference
+  screenshots + "liquid glass, smooth and bright fonts, minimalism,
+  uniform/homogeneous" directive.** Extracted the 7 screenshots actually
+  embedded in the BRD docx (unzip'd it directly — they'd never been looked
+  at before this) and sampled exact colors from them with PIL rather than
+  eyeballing: navy #1b3b6f, brand pink #ec407a (the literal "you are here"
+  active-tab color in every reference screenshot), teal #17a2b8, amber
+  #f5821f, green #43a047. Applied centrally rather than per-page — app.css's
+  shared classes (.card/.btn-pri/.btn-sec/.inp/.lbl/.chip) and
+  tailwind.config.js's new navy/brand/lagoon/amber2/leaf palette + Inter
+  typeface (self-hosted via @fontsource, not a CDN dependency) are what
+  every one of the ~25 pages already builds on, so one central change
+  reached the whole app uniformly instead of 25 individual edits.
+  "Liquid glass" specifically: a fixed, low-saturation radial-gradient
+  wash (pink/teal/navy) behind the whole app, with the sidebar/header and
+  the login/setup cards using a new .glass utility (backdrop-blur-xl +
+  translucent white + soft border) that floats above it — deliberately
+  NOT applied to data-dense content cards/tables, which stay flat opaque
+  white for legibility (glass at the navigation layer, clarity at the
+  data layer, a considered choice, not an oversight). Pink is used as a
+  single deliberate signature accent (active nav item, logo mark) rather
+  than spread across every button, matching the reference's own pattern
+  and the "spend your boldness in one place" principle.
+  Then swept all 25 page files: replaced neutral CHROME colors only
+  (slate-800/stone-50/stone-100/stone-200/divide-stone etc. used for
+  backgrounds, borders, muted text) with the new navy scale — deliberately
+  did NOT touch semantic status colors (emerald=success, rose=danger,
+  amber=pending/AI-draft, purple=AI, blue/cyan=phase indicators), since
+  recoloring those to match the brand palette would remove real
+  information a user relies on to parse status at a glance.
+  ALSO FOUND AND FIXED while reading the screenshots closely: the BRD's
+  own "BR-6.2 confirmed" banner on the Annual Review mockup reveals the
+  actual client-approved 7-parameter weights (17.78/11.11/17.78/17.78/
+  11.11/11.11/13.33%, derived from "share of the 45-element engagement
+  framework" — 8, 5, 8, 8, 5, 5, 6 elements respectively) — different
+  from the placeholder defaults used earlier in this session (15/15/14
+  ×5). Corrected migrations/008-review-parameters.js's DEFAULT_PARAMETERS
+  to the exact confirmed values; verified in Node that the new weights sum
+  to precisely 100 with zero floating-point drift, so weightsValid()'s
+  tolerance check passes cleanly. Existing already-seeded tenants keep
+  whatever values they have (HR can already edit these from the Cycles
+  screen) — this only changes the default for tenants provisioned from
+  here on.
+  VERIFIED LIVE, not just built: stood up the real backend + Vite dev
+  server + a headless Chrome (via puppeteer, using the cached Chrome
+  binary already present from an earlier npx playwright install) and
+  actually logged in and clicked through 6 different pages spanning every
+  major UI pattern in the app (nav-heavy, card/button-heavy, data-table-
+  heavy, stats+search+table-heavy, empty-state, and a page with real
+  semantic-color status chips) to confirm the redesign holds up
+  uniformly on real, already-seeded data — not just a static mockup.
+  113/113 backend tests pass (unaffected — this was a frontend-only
+  change plus the one migration default-value correction, verified with
+  DB attached); clean production build both before and after the full
+  color sweep.
 - 28-Aug-2026: **First-time setup screen added to the frontend** — using
   the backend bootstrap endpoint (below) required curl/PowerShell, which
   was correctly called out as not remotely user-friendly for whoever

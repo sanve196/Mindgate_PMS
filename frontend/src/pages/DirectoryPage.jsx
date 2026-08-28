@@ -26,7 +26,7 @@ export default function DirectoryPage() {
           <button className="btn-sec" disabled={!file} onClick={() => send(false)}>Validate</button>
           <button className="btn-pri" disabled={!file || !(report && report.ok && !report.committed)} onClick={() => send(true)}>Commit load</button>
         </div>
-        <p className="text-[11px] text-slate-400">Legacy .xls files aren't supported — save as .xlsx first (File → Save As → Excel Workbook).</p>
+        <p className="text-[11px] text-navy-400">Legacy .xls files aren't supported — save as .xlsx first (File → Save As → Excel Workbook).</p>
         {err && <p className="text-xs text-rose-600">{err}</p>}
         {report && (
           <div className="text-xs space-y-1">
@@ -37,15 +37,15 @@ export default function DirectoryPage() {
           </div>
         )}
       </div>
-      {!rows ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {!rows ? <p className="text-sm text-navy-400">Loading…</p> : (
         <div className="card overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-stone-50 text-[10px] uppercase tracking-wide text-slate-500">
+            <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
               <tr><th className="text-left px-3 py-2">Name</th><th className="text-left px-3 py-2">Email</th>
                 <th className="text-left px-3 py-2">Department</th><th className="text-left px-3 py-2">Designation</th>
                 <th className="text-left px-3 py-2">Manager</th><th className="text-left px-3 py-2">Status</th></tr>
             </thead>
-            <tbody className="divide-y divide-stone-100">
+            <tbody className="divide-y divide-navy-100">
               {rows.map(r => (
                 <tr key={r.id}><td className="px-3 py-2 font-semibold">{r.name}</td><td className="px-3 py-2">{r.email}</td>
                   <td className="px-3 py-2">{r.department || '—'}</td><td className="px-3 py-2">{r.designation || '—'}</td>

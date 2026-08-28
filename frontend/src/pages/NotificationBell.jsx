@@ -28,21 +28,21 @@ export default function NotificationBell() {
 
   return (
     <div className="relative" ref={ref}>
-      <button className="relative p-2 rounded-lg hover:bg-stone-100" onClick={() => setOpen(o => !o)} aria-label="Notifications">
-        <Bell size={16} className="text-slate-500" />
+      <button className="relative p-2 rounded-lg hover:bg-navy-50" onClick={() => setOpen(o => !o)} aria-label="Notifications">
+        <Bell size={16} className="text-navy-500" />
         {unread > 0 && <span className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] leading-4 text-center font-bold">{unread > 9 ? '9+' : unread}</span>}
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto bg-white border border-stone-200 rounded-lg shadow-lg z-20">
-          <div className="px-3 py-2 border-b border-stone-100 text-xs font-bold text-slate-500 uppercase tracking-wide">Notifications</div>
+        <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto bg-white border border-navy-100 rounded-lg shadow-lg z-20">
+          <div className="px-3 py-2 border-b border-navy-100 text-xs font-bold text-navy-500 uppercase tracking-wide">Notifications</div>
           {err && <p className="p-3 text-xs text-rose-600">{err}</p>}
-          {!err && !items.length && <p className="p-4 text-xs text-slate-400 text-center">Nothing yet.</p>}
+          {!err && !items.length && <p className="p-4 text-xs text-navy-400 text-center">Nothing yet.</p>}
           {items.map(n => (
             <a key={n.id} href={n.link || '#'} onClick={() => !n.read_at && markRead(n.id)}
-              className={`block px-3 py-2 border-b border-stone-50 last:border-0 hover:bg-stone-50 ${!n.read_at ? 'bg-amber-50/50' : ''}`}>
+              className={`block px-3 py-2 border-b border-navy-50 last:border-0 hover:bg-navy-50 ${!n.read_at ? 'bg-amber-50/50' : ''}`}>
               <p className="text-xs font-semibold">{n.title}</p>
-              {n.body && <p className="text-[11px] text-slate-500 mt-0.5">{n.body}</p>}
-              <p className="text-[10px] text-slate-400 mt-0.5">{new Date(n.created_at).toLocaleString()}</p>
+              {n.body && <p className="text-[11px] text-navy-500 mt-0.5">{n.body}</p>}
+              <p className="text-[10px] text-navy-400 mt-0.5">{new Date(n.created_at).toLocaleString()}</p>
             </a>
           ))}
         </div>

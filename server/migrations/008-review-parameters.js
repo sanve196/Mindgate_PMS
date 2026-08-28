@@ -4,19 +4,25 @@
 // "7-Parameter Pulse Check" (Fig. 7b) is explicitly informational and does
 // not feed a score anywhere, so it does not read this table either.
 //
-// The 7 drivers and default weights are the BRD/project-plan defaults
-// ("Build to the BRD defaults and confirm with the client HR team during
-// UAT" — the plan's own words), hence a configurable table rather than a
-// hardcoded list. Default weights sum to 100 exactly (15+15+14*5=100).
+// The 7 drivers and their weights match the BRD's own reference
+// screenshots exactly (the "BR-6.2 confirmed" banner shown on the Annual
+// Review mockup) — these are not a placeholder guess: "Weightage per
+// driver = its share of the 45-element engagement framework." My
+// Organisation Culture / My Manager / My Organisation each cover 8 of the
+// 45 elements (8/45 = 17.78%); My Work / My Senior Leadership / My Career
+// & Learning each cover 5 (5/45 = 11.11%); My Team covers 6 (6/45 =
+// 13.33%). Sums to exactly 100.00. Still a configurable table, not a
+// hardcoded list — HR can adjust it from the Cycles screen if the client
+// ever wants to.
 
 const DEFAULT_PARAMETERS = [
-  ['My Organisation Culture', 15],
-  ['My Work', 15],
-  ['My Manager', 14],
-  ['My Organisation', 14],
-  ['My Senior Leadership', 14],
-  ['My Career & Learning', 14],
-  ['My Team', 14],
+  ['My Organisation Culture', 17.78],
+  ['My Work', 11.11],
+  ['My Manager', 17.78],
+  ['My Organisation', 17.78],
+  ['My Senior Leadership', 11.11],
+  ['My Career & Learning', 11.11],
+  ['My Team', 13.33],
 ];
 
 // New tenants created after this migration ran (i.e. every normal boot of

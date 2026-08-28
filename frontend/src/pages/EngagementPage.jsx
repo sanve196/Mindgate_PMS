@@ -14,7 +14,7 @@ export default function EngagementPage() {
   useEffect(() => { load(); }, []);
 
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
   if (taking) return <TakeSurvey survey={taking} done={() => { setTaking(null); load(); }} />;
 
   const openSurvey = async (s) => {
@@ -57,7 +57,7 @@ export default function EngagementPage() {
           <p className="lbl">Your open surveys</p>
           {data.invitations.map(i => (
             <div key={i.id} className="flex items-center justify-between py-1.5">
-              <span className="text-sm">{i.title} <span className="chip bg-stone-100 text-slate-500 ml-1">{i.survey_type}</span>
+              <span className="text-sm">{i.title} <span className="chip bg-navy-50 text-navy-500 ml-1">{i.survey_type}</span>
                 {i.anonymity_default && <span className="chip bg-emerald-100 text-emerald-700 ml-1">anonymous</span>}</span>
               {i.completed_at ? <span className="text-xs text-emerald-600">completed ✓</span>
                 : <button className="btn-pri" onClick={() => setTaking(i)}>Take</button>}
@@ -66,42 +66,42 @@ export default function EngagementPage() {
         </div>
       )}
 
-      <div className="card divide-y divide-stone-100">
+      <div className="card divide-y divide-navy-100">
         {data.surveys.map(s => (
           <div key={s.id} className="p-3 flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold flex-1">{s.title}</span>
-            <span className={`chip ${s.status === 'open' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-slate-600'}`}>{s.status}</span>
-            <span className="text-xs text-slate-400">{s.completed}/{s.invited} completed</span>
+            <span className={`chip ${s.status === 'open' ? 'bg-emerald-100 text-emerald-700' : 'bg-navy-50 text-navy-600'}`}>{s.status}</span>
+            <span className="text-xs text-navy-400">{s.completed}/{s.invited} completed</span>
             {data.admin && s.status === 'draft' && <button className="btn-sec" onClick={() => openSurvey(s)}><Play size={12} className="inline mr-1" />Open</button>}
             {data.admin && s.status === 'open' && <button className="btn-sec" onClick={async () => { await api(`/engagement/surveys/${s.id}/close`, { method: 'POST' }); load(); }}><Square size={12} className="inline mr-1" />Close</button>}
             {data.admin && <button className="btn-sec" onClick={() => viewResults(s)}>Results</button>}
           </div>
         ))}
-        {!data.surveys.length && <p className="p-6 text-center text-sm text-slate-400">No surveys yet.</p>}
+        {!data.surveys.length && <p className="p-6 text-center text-sm text-navy-400">No surveys yet.</p>}
       </div>
 
       {results && (
         <div className="card p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-bold flex-1">{results.survey.title} — results</p>
-            <span className="chip bg-stone-100 text-slate-600">participation {results.participation.rate}%</span>
+            <span className="chip bg-navy-50 text-navy-600">participation {results.participation.rate}%</span>
             <button className="btn-sec" disabled={busy} onClick={() => askThemes(results.survey.id)}>
               <Sparkles size={13} className="inline mr-1 text-amber-500" />{busy ? 'Theming…' : 'Theme verbatims (agent)'}</button>
           </div>
           {results.questions.map(q => (
-            <div key={q.id} className="text-xs border-t border-stone-100 pt-2">
+            <div key={q.id} className="text-xs border-t border-navy-100 pt-2">
               <p className="font-semibold">{q.prompt}</p>
               {q.qtype === 'text'
-                ? <p className="text-slate-500">{(q.verbatims || []).length} text answers (themed via the agent — individual verbatims stay in the data)</p>
-                : <p className="text-slate-600">n={q.n} · avg {q.average}{q.enps !== undefined && <> · <b>eNPS {q.enps}</b></>}</p>}
+                ? <p className="text-navy-500">{(q.verbatims || []).length} text answers (themed via the agent — individual verbatims stay in the data)</p>
+                : <p className="text-navy-600">n={q.n} · avg {q.average}{q.enps !== undefined && <> · <b>eNPS {q.enps}</b></>}</p>}
             </div>
           ))}
           {themes && (
-            <div className="bg-slate-900 text-slate-100 rounded-lg p-3 text-xs space-y-2">
+            <div className="bg-navy-800 text-slate-100 rounded-lg p-3 text-xs space-y-2">
               <DraftBadge />
               {(themes.themes || []).map((t, i) => (
-                <div key={i}><p className="font-bold">{t.name} <span className="text-slate-400 font-normal">({t.prevalence})</span></p>
-                  <p>{t.summary}</p>{t.representative_quote && <p className="text-slate-400 italic">"{t.representative_quote}"</p>}</div>
+                <div key={i}><p className="font-bold">{t.name} <span className="text-navy-400 font-normal">({t.prevalence})</span></p>
+                  <p>{t.summary}</p>{t.representative_quote && <p className="text-navy-400 italic">"{t.representative_quote}"</p>}</div>
               ))}
             </div>
           )}
@@ -118,7 +118,7 @@ function TakeSurvey({ survey, done }) {
   const [err, setErr] = useState(null);
   useEffect(() => { api(`/engagement/surveys/${survey.id}/questions`).then(r => setQs(r.questions)).catch(e => setErr(e.message)); }, [survey.id]);
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!qs) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!qs) return <p className="text-sm text-navy-400">Loading…</p>;
   const submit = async () => {
     setErr(null);
     try { await api(`/engagement/surveys/${survey.id}/respond`, { method: 'POST', body: JSON.stringify({ answers, attribute }) }); done(); }
@@ -137,14 +137,14 @@ function TakeSurvey({ survey, done }) {
               <div className="flex gap-1.5 flex-wrap">
                 {(q.qtype === 'enps' ? [...Array(11).keys()] : [1, 2, 3, 4, 5]).map(n => (
                   <button key={n} onClick={() => setAnswers(a => ({ ...a, [q.id]: { num: n } }))}
-                    className={`w-9 h-9 rounded-lg text-sm font-semibold border ${answers[q.id]?.num === n ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-stone-300 hover:bg-stone-50'}`}>{n}</button>
+                    className={`w-9 h-9 rounded-lg text-sm font-semibold border ${answers[q.id]?.num === n ? 'bg-navy-700 text-white border-navy-600' : 'bg-white border-navy-100 hover:bg-navy-50'}`}>{n}</button>
                 ))}
               </div>
             )}
         </div>
       ))}
       {survey.anonymity_default && survey.allow_attribution_optin && (
-        <label className="flex items-center gap-2 text-xs text-slate-600">
+        <label className="flex items-center gap-2 text-xs text-navy-600">
           <input type="checkbox" checked={attribute} onChange={e => setAttribute(e.target.checked)} />
           Attach my name to my answers (optional)
         </label>

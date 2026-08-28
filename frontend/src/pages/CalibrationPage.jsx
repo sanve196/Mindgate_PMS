@@ -20,8 +20,8 @@ export default function CalibrationPage() {
   };
 
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active cycle.</div>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
 
   const dist = data.distribution || {};
   const targets = data.cycle.bell_curve || {};
@@ -36,7 +36,7 @@ export default function CalibrationPage() {
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
       {brief && (
-        <div className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs space-y-2">
+        <div className="bg-navy-800 text-slate-100 rounded-xl p-4 text-xs space-y-2">
           <DraftBadge />
           <p className="text-sm font-semibold">{brief.headline}</p>
           {(brief.deviations || []).map((d, i) => <p key={i}>• {d}</p>)}
@@ -50,25 +50,25 @@ export default function CalibrationPage() {
           {['1', '2', '3', '4', '5', 'unrated'].map(k => (
             <div key={k} className="text-center">
               <p className="text-lg font-bold">{dist[k] || 0}</p>
-              <p className="text-[10px] text-slate-400">rating {k}</p>
-              <p className="text-[10px] text-slate-500">{Math.round(((dist[k] || 0) / total) * 100)}% {targets[k] != null && <span className="text-slate-400">/ tgt {targets[k]}%</span>}</p>
+              <p className="text-[10px] text-navy-400">rating {k}</p>
+              <p className="text-[10px] text-navy-500">{Math.round(((dist[k] || 0) / total) * 100)}% {targets[k] != null && <span className="text-navy-400">/ tgt {targets[k]}%</span>}</p>
             </div>
           ))}
         </div>
       </div>
       <div className="card overflow-x-auto">
         <table className="w-full text-xs">
-          <thead className="bg-stone-50 text-[10px] uppercase tracking-wide text-slate-500">
+          <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
             <tr><th className="text-left px-3 py-2">Employee</th><th className="text-left px-3 py-2">Dept</th>
               <th className="text-right px-3 py-2">Mgr</th><th className="text-right px-3 py-2">Delivery Head</th>
               <th className="text-right px-3 py-2">Proposed</th><th className="text-left px-3 py-2">9-box</th><th className="px-3 py-2">Adjust</th></tr>
           </thead>
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-navy-100">
             {data.rows.map(r => <CalRow key={r.employee_id} r={r} reload={load} />)}
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-slate-400">Every adjustment requires a reason — it is the permanent answer to "why did my rating change".</p>
+      <p className="text-[11px] text-navy-400">Every adjustment requires a reason — it is the permanent answer to "why did my rating change".</p>
     </div>
   );
 }

@@ -12,8 +12,8 @@ export default function MyKRASheetPage() {
   useEffect(() => { load(); }, []);
 
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active appraisal cycle. HR opens the cycle; your KRA sheet appears here.</div>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active appraisal cycle. HR opens the cycle; your KRA sheet appears here.</div>;
 
   const total = kras.reduce((s, k) => s + (Number(k.weight) || 0), 0);
   const locked = data.sheet.status === 'approved' || data.sheet.status === 'submitted';
@@ -35,7 +35,7 @@ export default function MyKRASheetPage() {
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">My KRAs</h2>
         <span className={`chip ${phaseColor(data.cycle.phase)}`}>{data.cycle.name} · {phaseLabel(data.cycle.phase)}</span>
-        <span className={`chip ${data.sheet.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : data.sheet.status === 'returned' ? 'bg-rose-100 text-rose-700' : 'bg-stone-100 text-slate-600'}`}>sheet: {data.sheet.status}</span>
+        <span className={`chip ${data.sheet.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : data.sheet.status === 'returned' ? 'bg-rose-100 text-rose-700' : 'bg-navy-50 text-navy-600'}`}>sheet: {data.sheet.status}</span>
         <span className={`chip ${Math.abs(total - 100) < 0.01 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>weights: {total}/100</span>
       </div>
       {data.sheet.status === 'returned' && data.sheet.manager_comment && (
@@ -61,7 +61,7 @@ export default function MyKRASheetPage() {
             <Send size={13} className="inline mr-1" />Save & submit to manager</button>
         </div>
       )}
-      {!editable && !locked && <p className="text-xs text-slate-400">KRA editing opens in the {phaseLabel('kra_open')} phase.</p>}
+      {!editable && !locked && <p className="text-xs text-navy-400">KRA editing opens in the {phaseLabel('kra_open')} phase.</p>}
     </div>
   );
 }

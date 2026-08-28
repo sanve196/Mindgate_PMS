@@ -68,9 +68,14 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen lg:flex">
-        <aside className="lg:w-56 lg:shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-stone-200">
+        <aside className="glass lg:w-60 lg:shrink-0 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto rounded-none lg:rounded-r-2xl">
           <div className="px-4 py-4 flex items-center justify-between">
-            <h1 className="text-base font-bold flex items-center gap-2"><Sparkles size={16} className="text-amber-500" /> Agentic PMS</h1>
+            <h1 className="text-base font-bold flex items-center gap-2 text-navy-900">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-navy-700 to-brand-500 flex items-center justify-center shadow-card shrink-0">
+                <Sparkles size={13} className="text-white" />
+              </span>
+              Agentic PMS
+            </h1>
             <div className="flex items-center gap-1">
               <NotificationBell />
               <button className="lg:hidden btn-sec" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}><LogOut size={12} /></button>
@@ -79,19 +84,19 @@ export default function App() {
           <nav className="px-2 pb-4 flex lg:block overflow-x-auto gap-1">
             {NAV.map(g => (
               <div key={g.group} className="lg:mb-3 flex lg:block gap-1">
-                <p className="hidden lg:block px-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">{g.group}</p>
+                <p className="hidden lg:block px-2 text-[10px] font-bold text-navy-400 uppercase tracking-wide mb-1">{g.group}</p>
                 {g.items.map(it => (
                   <NavLink key={it.to} to={it.to}
-                    className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap ${isActive ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-stone-100'}`}>
+                    className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-xl text-sm whitespace-nowrap transition-colors ${isActive ? 'bg-brand-500 text-white shadow-card' : 'text-navy-600 hover:bg-white/70'}`}>
                     <it.icon size={14} />{it.label}
                   </NavLink>
                 ))}
               </div>
             ))}
           </nav>
-          <div className="hidden lg:block px-4 py-3 border-t border-stone-100 text-xs text-slate-500">
+          <div className="hidden lg:block px-4 py-3 border-t border-navy-100/60 text-xs text-navy-500">
             {user.name} · {user.role}
-            <button className="block mt-1 text-amber-700 font-medium" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}>Sign out</button>
+            <button className="block mt-1 text-brand-600 font-semibold" onClick={() => { localStorage.removeItem('apms_token'); location.href = '/'; }}>Sign out</button>
           </div>
         </aside>
         <main className="flex-1 min-w-0 p-4 lg:p-6">
@@ -160,14 +165,19 @@ function FirstTimeSetup({ onUser }) {
     } catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
-    <div className="max-w-sm mx-auto mt-[10vh] flex flex-col gap-3">
-      <h1 className="text-lg font-bold flex items-center gap-2"><Sparkles size={18} className="text-amber-500" /> Agentic PMS — First-Time Setup</h1>
-      <p className="text-xs text-slate-500">No account exists yet on this deployment. Create the first admin account below — this screen only appears once.</p>
+    <div className="max-w-sm mx-auto mt-[10vh] flex flex-col gap-3 glass rounded-2xl p-6">
+      <h1 className="text-lg font-bold flex items-center gap-2 text-navy-900">
+        <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-navy-700 to-brand-500 flex items-center justify-center shadow-card shrink-0">
+          <Sparkles size={14} className="text-white" />
+        </span>
+        Agentic PMS — First-Time Setup
+      </h1>
+      <p className="text-xs text-navy-500">No account exists yet on this deployment. Create the first admin account below — this screen only appears once.</p>
       <input className="inp" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
       <input className="inp" placeholder="Your email" value={email} onChange={e => setEmail(e.target.value)} />
       <input className="inp" type="password" placeholder="Choose a password (min 8 characters)" value={password} onChange={e => setPassword(e.target.value)} />
       <input className="inp" type="password" placeholder="Confirm password" value={confirm} onChange={e => setConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
-      {err && <p className="text-xs text-rose-600">{err}</p>}
+      {err && <p className="text-xs text-brand-600">{err}</p>}
       <button className="btn-pri" disabled={busy} onClick={go}>{busy ? 'Creating account…' : 'Create admin account & sign in'}</button>
     </div>
   );
@@ -183,13 +193,18 @@ function SignIn({ onUser }) {
     } catch (e) { setErr(e.message); }
   };
   return (
-    <div className="max-w-xs mx-auto mt-[14vh] flex flex-col gap-3">
-      <h1 className="text-lg font-bold flex items-center gap-2"><Sparkles size={18} className="text-amber-500" /> Agentic PMS</h1>
+    <div className="max-w-xs mx-auto mt-[14vh] flex flex-col gap-3 glass rounded-2xl p-6">
+      <h1 className="text-lg font-bold flex items-center gap-2 text-navy-900">
+        <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-navy-700 to-brand-500 flex items-center justify-center shadow-card shrink-0">
+          <Sparkles size={14} className="text-white" />
+        </span>
+        Agentic PMS
+      </h1>
       <input className="inp" placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
       <input className="inp" type="password" placeholder="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
-      {err && <p className="text-xs text-rose-600">{err}</p>}
+      {err && <p className="text-xs text-brand-600">{err}</p>}
       <button className="btn-pri" onClick={go}>Sign in</button>
-      <p className="text-[11px] text-slate-400">Production instances sign in with your organisation's identity provider.</p>
+      <p className="text-[11px] text-navy-400">Production instances sign in with your organisation's identity provider.</p>
     </div>
   );
 }

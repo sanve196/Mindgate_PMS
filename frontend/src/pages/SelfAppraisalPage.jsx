@@ -34,12 +34,12 @@ export default function SelfAppraisalPage() {
   const setField = (k) => (e) => { const next = { ...f, [k]: e.target.value }; setF(next); queue({ [k]: e.target.value }); };
 
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active cycle.</div>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
 
   const a = data.appraisal;
   const open = data.cycle.phase === 'self_appraisal' && a.status !== 'submitted';
-  const badge = { idle: null, dirty: ['Unsaved…', 'text-slate-400'], saving: ['Saving…', 'text-amber-600'], saved: ['Saved ✓', 'text-emerald-600'], error: ['Save failed', 'text-rose-600'] }[state];
+  const badge = { idle: null, dirty: ['Unsaved…', 'text-navy-400'], saving: ['Saving…', 'text-amber-600'], saved: ['Saved ✓', 'text-emerald-600'], error: ['Save failed', 'text-rose-600'] }[state];
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -55,7 +55,7 @@ export default function SelfAppraisalPage() {
         <div key={k.id} className="card p-3 space-y-2">
           <div className="flex justify-between items-baseline">
             <p className="text-sm font-semibold">{k.title}</p>
-            <span className="text-[11px] text-slate-400">{k.weight}%</span>
+            <span className="text-[11px] text-navy-400">{k.weight}%</span>
           </div>
           <textarea className="inp" rows={3} placeholder="What you achieved against this KRA — be specific, name evidence"
             value={(entries[k.id] || {}).narrative || ''} onChange={setEntry(k.id, 'narrative')} disabled={!open} />
@@ -103,8 +103,8 @@ function EvidenceSection({ editable }) {
     <div className="card p-3 space-y-2">
       <label className="lbl">Supporting evidence</label>
       {(files || []).map(f => (
-        <div key={f.id} className="flex items-center justify-between text-xs bg-stone-50 rounded-lg px-2 py-1.5">
-          <span className="flex items-center gap-1"><Paperclip size={12} className="text-slate-400" />{f.filename} <span className="text-slate-400">({Math.round(f.file_size / 1024)} KB)</span></span>
+        <div key={f.id} className="flex items-center justify-between text-xs bg-navy-50 rounded-lg px-2 py-1.5">
+          <span className="flex items-center gap-1"><Paperclip size={12} className="text-navy-400" />{f.filename} <span className="text-navy-400">({Math.round(f.file_size / 1024)} KB)</span></span>
           <span className="flex items-center gap-1">
             <a href={`${API_BASE}/pms/evidence/${f.id}/download?token=${token}`} className="btn-sec !p-1" target="_blank" rel="noreferrer"><Download size={12} /></a>
             {editable && <button className="btn-sec !p-1" onClick={() => remove(f.id)}><Trash2 size={12} /></button>}

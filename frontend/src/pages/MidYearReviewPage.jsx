@@ -9,8 +9,8 @@ export default function MidYearReviewPage() {
   useEffect(() => { api('/pms/my/midyear-review').then(setData).catch(e => setErr(e.message)); }, []);
 
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active mid-year cycle.</div>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active mid-year cycle.</div>;
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -27,7 +27,7 @@ export default function MidYearReviewPage() {
           narratives={[['Strengths', data.manager.strengths], ['Improvement areas', data.manager.improvement_areas]]} />
       </div>
 
-      <p className="text-xs text-slate-400">Both sides sign off independently — each is tracked as Pending or Signed until they submit their half.</p>
+      <p className="text-xs text-navy-400">Both sides sign off independently — each is tracked as Pending or Signed until they submit their half.</p>
     </div>
   );
 }
@@ -44,7 +44,7 @@ function SignOffCard({ title, party, ratingLabel, rating, narratives, editHref, 
       </div>
       {rating != null && <p className="text-xs">{ratingLabel}: <span className="font-mono font-semibold">{rating}</span></p>}
       {narratives.map(([label, text]) => text && <p key={label} className="text-xs"><b>{label}:</b> {text}</p>)}
-      {!signed && party.status === 'not_started' && <p className="text-xs text-slate-400">Not started yet.</p>}
+      {!signed && party.status === 'not_started' && <p className="text-xs text-navy-400">Not started yet.</p>}
       {editHref && !signed && <Link to={editHref} className="btn-sec inline-block !py-1 !text-[11px]">{editLabel}</Link>}
     </div>
   );

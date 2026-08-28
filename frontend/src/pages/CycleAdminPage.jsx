@@ -41,7 +41,7 @@ export default function CycleAdminPage() {
   };
 
   if (err && !cycles) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!cycles) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!cycles) return <p className="text-sm text-navy-400">Loading…</p>;
 
   return (
     <div className="space-y-4 max-w-4xl">
@@ -52,12 +52,12 @@ export default function CycleAdminPage() {
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
       {health?.draft && (
-        <div className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs space-y-2">
+        <div className="bg-navy-800 text-slate-100 rounded-xl p-4 text-xs space-y-2">
           <div className="flex items-center gap-2"><Sparkles size={13} className="text-amber-300" /><DraftBadge /></div>
           <p className="text-sm font-semibold">{health.draft.headline}</p>
           {health.draft.bottleneck && <p><b>Bottleneck:</b> {health.draft.bottleneck}</p>}
           {(health.draft.chase_this_week || []).map((c, i) => <p key={i}>→ {c}</p>)}
-          {(health.draft.caveats || []).length > 0 && <p className="text-slate-400">Caveats: {health.draft.caveats.join(' · ')}</p>}
+          {(health.draft.caveats || []).length > 0 && <p className="text-navy-400">Caveats: {health.draft.caveats.join(' · ')}</p>}
         </div>
       )}
       {cycles.map(c => {
@@ -67,12 +67,12 @@ export default function CycleAdminPage() {
         return (
           <div key={c.id} className="card p-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-bold flex-1">{c.name} <span className="text-slate-400 font-normal">· {c.fiscal_year} · {c.cycle_type}</span></p>
+              <p className="text-sm font-bold flex-1">{c.name} <span className="text-navy-400 font-normal">· {c.fiscal_year} · {c.cycle_type}</span></p>
               <span className={`chip ${phaseColor(c.phase)}`}>{phaseLabel(c.phase)}</span>
             </div>
             <div className="flex flex-wrap gap-1.5 text-[10px]">
               {PHASES.map((p, j) => (
-                <span key={p} className={`px-2 py-1 rounded ${j < i ? 'bg-emerald-50 text-emerald-600' : j === i ? 'bg-slate-800 text-white' : 'bg-stone-100 text-slate-400'}`}>{phaseLabel(p)}</span>
+                <span key={p} className={`px-2 py-1 rounded ${j < i ? 'bg-emerald-50 text-emerald-600' : j === i ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-400'}`}>{phaseLabel(p)}</span>
               ))}
             </div>
             {!['closed', 'cancelled'].includes(c.phase) && (
@@ -85,7 +85,7 @@ export default function CycleAdminPage() {
           </div>
         );
       })}
-      {!cycles.length && <div className="card p-8 text-center text-sm text-slate-400">No cycles yet. Create one to begin — it starts in Draft; advance to KRA Setting when ready.</div>}
+      {!cycles.length && <div className="card p-8 text-center text-sm text-navy-400">No cycles yet. Create one to begin — it starts in Draft; advance to KRA Setting when ready.</div>}
       <ReviewParametersConfig />
     </div>
   );
@@ -104,7 +104,7 @@ function ReviewParametersConfig() {
   useEffect(() => { load(); }, []);
 
   if (err && !rows) return <p className="text-xs text-rose-600">{err}</p>;
-  if (!rows) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!rows) return <p className="text-sm text-navy-400">Loading…</p>;
 
   const total = rows.reduce((s, r) => s + (Number(r.weight_pct) || 0), 0);
   const validTotal = Math.abs(total - 100) < 0.01;
@@ -126,14 +126,14 @@ function ReviewParametersConfig() {
     <div className="card p-4 space-y-3">
       <div>
         <p className="font-bold text-sm">7 Organizational Parameters</p>
-        <p className="text-xs text-slate-400">Used to compute the weighted overall rating on annual-cycle evaluations (BR-6.2/6.3). Weights must sum to 100.</p>
+        <p className="text-xs text-navy-400">Used to compute the weighted overall rating on annual-cycle evaluations (BR-6.2/6.3). Weights must sum to 100.</p>
       </div>
       <div className="space-y-1.5">
         {rows.map((r, i) => (
           <div key={r.id || i} className="flex items-center gap-2">
             <input className="inp flex-1" value={r.name} onChange={e => update(i, 'name', e.target.value)} placeholder="Parameter name" />
             <input className="inp w-20 text-right" type="number" step="0.5" min="0" value={r.weight_pct} onChange={e => update(i, 'weight_pct', e.target.value)} />
-            <span className="text-xs text-slate-400">%</span>
+            <span className="text-xs text-navy-400">%</span>
             <button className="btn-sec !p-1.5" onClick={() => remove(i)}><Trash2 size={13} /></button>
           </div>
         ))}

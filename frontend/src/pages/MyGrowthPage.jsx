@@ -3,7 +3,7 @@ import { Plus, Trash2, Send, CheckCircle2, RotateCcw } from 'lucide-react';
 import { api } from '../utils/api';
 
 const STATUS_COLOR = {
-  draft: 'bg-slate-100 text-slate-600',
+  draft: 'bg-slate-100 text-navy-600',
   submitted: 'bg-amber-100 text-amber-700',
   approved: 'bg-emerald-100 text-emerald-700',
   returned: 'bg-rose-100 text-rose-700',
@@ -30,8 +30,8 @@ function DevelopmentPlanCard() {
   useEffect(() => { load(); }, []);
 
   if (err) return <div className="card p-4"><p className="text-sm text-rose-600">{err}</p></div>;
-  if (!data) return <div className="card p-4"><p className="text-sm text-slate-400">Loading…</p></div>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active cycle.</div>;
+  if (!data) return <div className="card p-4"><p className="text-sm text-navy-400">Loading…</p></div>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
 
   const editable = data.plan.status === 'draft' || data.plan.status === 'returned';
 
@@ -77,11 +77,11 @@ function GoalList({ goals: initial, editable, onSaved }) {
   if (!editable) {
     return (
       <div className="space-y-2">
-        {!goals.length && <p className="text-xs text-slate-400">No development goals recorded.</p>}
+        {!goals.length && <p className="text-xs text-navy-400">No development goals recorded.</p>}
         {goals.map(g => (
-          <div key={g.id} className="text-xs bg-stone-50 rounded-lg p-2 space-y-1">
+          <div key={g.id} className="text-xs bg-navy-50 rounded-lg p-2 space-y-1">
             <p className="font-semibold">{g.title}</p>
-            {g.description && <p className="text-slate-500">{g.description}</p>}
+            {g.description && <p className="text-navy-500">{g.description}</p>}
             <ProgressBar value={g.progress_pct} onChange={(v) => setProgress(g.id, v)} />
           </div>
         ))}
@@ -92,7 +92,7 @@ function GoalList({ goals: initial, editable, onSaved }) {
   return (
     <div className="space-y-2">
       {goals.map((g, i) => (
-        <div key={g.id || i} className="border border-stone-100 rounded-lg p-2 space-y-1.5">
+        <div key={g.id || i} className="border border-navy-100 rounded-lg p-2 space-y-1.5">
           <div className="flex gap-1.5">
             <input className="inp flex-1" placeholder="Goal title" value={g.title} onChange={e => update(i, 'title', e.target.value)} />
             <input className="inp w-32" type="date" value={g.target_date || ''} onChange={e => update(i, 'target_date', e.target.value)} />
@@ -113,12 +113,12 @@ function GoalList({ goals: initial, editable, onSaved }) {
 function ProgressBar({ value, onChange }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 h-2 bg-stone-200 rounded-full overflow-hidden">
+      <div className="flex-1 h-2 bg-navy-100 rounded-full overflow-hidden">
         <div className="h-full bg-emerald-500" style={{ width: `${value}%` }} />
       </div>
       <input className="inp w-16 !py-0.5 text-right" type="number" min="0" max="100" value={value}
         onChange={e => onChange(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} />
-      <span className="text-[10px] text-slate-400">%</span>
+      <span className="text-[10px] text-navy-400">%</span>
     </div>
   );
 }
@@ -140,7 +140,7 @@ function CareerPathCard() {
   };
 
   if (err && !data) return <div className="card p-4"><p className="text-sm text-rose-600">{err}</p></div>;
-  if (!data) return <div className="card p-4"><p className="text-sm text-slate-400">Loading…</p></div>;
+  if (!data) return <div className="card p-4"><p className="text-sm text-navy-400">Loading…</p></div>;
 
   return (
     <div className="card p-4 space-y-3">
@@ -155,7 +155,7 @@ function CareerPathCard() {
         ) : (
           <input className="inp" value={form.target_role} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))} placeholder="e.g. Staff Engineer" />
         )}
-        {data.eligible_role_bands.length > 0 && <p className="text-[11px] text-slate-400 mt-1">Limited to your organisation's configured role bands (guardrails).</p>}
+        {data.eligible_role_bands.length > 0 && <p className="text-[11px] text-navy-400 mt-1">Limited to your organisation's configured role bands (guardrails).</p>}
       </div>
       <div>
         <label className="lbl">Growth plan</label>
@@ -188,7 +188,7 @@ function TeamDevelopmentPlans() {
         <div key={p.id} className="card">
           <button className="w-full flex items-center justify-between px-4 py-3 text-left" onClick={() => setOpenId(v => v === p.id ? null : p.id)}>
             <span className="text-sm font-semibold flex-1">{p.employee_name}</span>
-            <span className="text-xs text-slate-400 mr-2">{p.goal_count} goals · {p.avg_progress}% avg</span>
+            <span className="text-xs text-navy-400 mr-2">{p.goal_count} goals · {p.avg_progress}% avg</span>
             <span className={`chip ${STATUS_COLOR[p.status]}`}>{p.status}</span>
           </button>
           {openId === p.id && <TeamPlanDecide plan={p} reload={load} />}
@@ -209,7 +209,7 @@ function TeamPlanDecide({ plan, reload }) {
   };
   if (plan.status !== 'submitted') return null;
   return (
-    <div className="border-t border-stone-100 p-3 flex gap-2">
+    <div className="border-t border-navy-100 p-3 flex gap-2">
       <button className="btn-pri" onClick={() => decide('approved')}><CheckCircle2 size={13} className="inline mr-1" />Approve</button>
       <button className="btn-sec" onClick={() => decide('returned')}><RotateCcw size={13} className="inline mr-1" />Return with comment</button>
       {err && <p className="text-xs text-rose-600">{err}</p>}

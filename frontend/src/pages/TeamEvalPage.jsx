@@ -11,8 +11,8 @@ export default function TeamEvalPage() {
   useEffect(() => { load(); }, []);
 
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-slate-400">No active cycle.</div>;
+  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
 
   return (
     <div className="space-y-4 max-w-4xl">
@@ -20,14 +20,14 @@ export default function TeamEvalPage() {
         <h2 className="text-lg font-bold">Team Evaluation</h2>
         <span className={`chip ${phaseColor(data.cycle.phase)}`}>{data.cycle.name} · {phaseLabel(data.cycle.phase)}</span>
       </div>
-      {!data.team.length && <div className="card p-8 text-center text-sm text-slate-400">No direct reports found in the employee mirror.</div>}
+      {!data.team.length && <div className="card p-8 text-center text-sm text-navy-400">No direct reports found in the employee mirror.</div>}
       {data.team.map(t => (
         <div key={t.employee_id} className="card overflow-hidden">
           <button className="w-full flex items-center gap-2 px-4 py-3 text-left" onClick={() => setOpenId(v => v === t.employee_id ? null : t.employee_id)}>
             {openId === t.employee_id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <span className="text-sm font-semibold flex-1">{t.name}</span>
             <span className={`chip ${t.self_status === 'submitted' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>self: {t.self_status || 'not started'}</span>
-            <span className={`chip ${t.eval_status === 'submitted' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-slate-600'}`}>eval: {t.eval_status || 'pending'}</span>
+            <span className={`chip ${t.eval_status === 'submitted' ? 'bg-emerald-100 text-emerald-700' : 'bg-navy-50 text-navy-600'}`}>eval: {t.eval_status || 'pending'}</span>
           </button>
           {openId === t.employee_id && <EvalEditor t={t} phase={data.cycle.phase} scale={data.cycle.rating_scale} cycleType={data.cycle.cycle_type} reload={load} />}
         </div>
@@ -61,13 +61,13 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
     catch (e) { setErr(e.message); }
     setDrafting(false);
   };
-  const badge = { idle: null, dirty: ['Unsaved…', 'text-slate-400'], saving: ['Saving…', 'text-amber-600'], saved: ['Saved ✓', 'text-emerald-600'], error: ['Save failed', 'text-rose-600'] }[state];
+  const badge = { idle: null, dirty: ['Unsaved…', 'text-navy-400'], saving: ['Saving…', 'text-amber-600'], saved: ['Saved ✓', 'text-emerald-600'], error: ['Save failed', 'text-rose-600'] }[state];
 
   return (
-    <div className="border-t border-stone-100 p-4 space-y-3">
+    <div className="border-t border-navy-100 p-4 space-y-3">
       {t.self_status === 'submitted' && (
-        <div className="bg-stone-50 border border-stone-200 rounded-lg p-3 text-xs space-y-1">
-          <p className="font-bold text-slate-500 uppercase text-[10px]">Their self-appraisal</p>
+        <div className="bg-navy-50 border border-navy-100 rounded-lg p-3 text-xs space-y-1">
+          <p className="font-bold text-navy-500 uppercase text-[10px]">Their self-appraisal</p>
           {t.went_well && <p><b>Went well:</b> {t.went_well}</p>}
           {t.could_improve && <p><b>Could improve:</b> {t.could_improve}</p>}
         </div>
@@ -93,12 +93,12 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
         {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
       </div>
       {draft && (
-        <div className="bg-slate-900 text-slate-100 rounded-lg p-3 text-xs space-y-2">
+        <div className="bg-navy-800 text-slate-100 rounded-lg p-3 text-xs space-y-2">
           <DraftBadge />
           {draft.strengths && <p><b>Strengths:</b> {draft.strengths}</p>}
           {draft.improvement_areas && <p><b>Improvement areas:</b> {draft.improvement_areas}</p>}
           {(draft.gaps || []).length > 0 && <p className="text-amber-300">Input gaps: {draft.gaps.join(' · ')}</p>}
-          <button className="btn-sec !bg-slate-800 !text-white !border-slate-600" onClick={() => {
+          <button className="btn-sec !bg-navy-700 !text-white !border-navy-600" onClick={() => {
             setF(s => ({ ...s, strengths: draft.strengths || s.strengths, improvement_areas: draft.improvement_areas || s.improvement_areas }));
             persist({ strengths: draft.strengths, improvement_areas: draft.improvement_areas });
           }}>Copy into fields (then edit)</button>
@@ -138,15 +138,15 @@ function ParameterScoring({ employeeId, editable, initialRating }) {
   };
 
   if (err) return <p className="text-xs text-rose-600">{err}</p>;
-  if (!data) return <p className="text-xs text-slate-400">Loading parameters…</p>;
+  if (!data) return <p className="text-xs text-navy-400">Loading parameters…</p>;
 
   return (
     <div className="space-y-2">
       <p className="lbl mb-0">7 Organizational Parameters {!data.complete && <span className="text-amber-600 font-normal">— {data.missing.length} not yet scored</span>}</p>
       <div className="grid sm:grid-cols-2 gap-2">
         {data.parameters.map(p => (
-          <div key={p.id} className="flex items-center justify-between gap-2 bg-stone-50 rounded-lg px-2 py-1.5">
-            <span className="text-xs">{p.name} <span className="text-slate-400">({p.weight_pct}%)</span></span>
+          <div key={p.id} className="flex items-center justify-between gap-2 bg-navy-50 rounded-lg px-2 py-1.5">
+            <span className="text-xs">{p.name} <span className="text-navy-400">({p.weight_pct}%)</span></span>
             <select className="inp !py-1 w-16" value={data.scores[p.id] ?? ''} disabled={!editable} onChange={e => setScore(p.id, e.target.value)}>
               <option value="">—</option>
               {[1, 2, 3, 4, 5].map(v => <option key={v} value={v}>{v}</option>)}
@@ -156,8 +156,8 @@ function ParameterScoring({ employeeId, editable, initialRating }) {
       </div>
       <p className="text-sm">
         <span className="font-semibold">Weighted overall rating: </span>
-        <span className={data.complete ? 'text-emerald-700 font-bold' : 'text-slate-400'}>{data.weighted_rating ?? '—'}</span>
-        {!data.complete && <span className="text-[11px] text-slate-400"> (updates live as parameters are scored; final once all 7 are)</span>}
+        <span className={data.complete ? 'text-emerald-700 font-bold' : 'text-navy-400'}>{data.weighted_rating ?? '—'}</span>
+        {!data.complete && <span className="text-[11px] text-navy-400"> (updates live as parameters are scored; final once all 7 are)</span>}
       </p>
     </div>
   );
