@@ -15,6 +15,7 @@ const { authenticate } = require('../../core/auth');
 const { apiPermissionParity, hasPermission } = require('../../core/permissions');
 const { notify } = require('../../core/notifications');
 const { requireConsent } = require('../../core/consent');
+const { isSuper50Eligible } = require('./rating-rules');
 const pm = require('./phase-machine');
 
 const router = express.Router();
@@ -418,7 +419,7 @@ router.post('/publish', async (req, res) => {
         WHERE e.tenant_id=$2`, [c.id, T(req)])).rows;
     const scale = Array.isArray(c.rating_scale) ? c.rating_scale : [];
     const label = (v) => { const m = scale.find(s => Math.round(v) === s.value); return m ? m.label : null; };
-    let published = 0; let pipsOpened = 0; const failures = [];
+    let published = 0; let pipsOpened = 0; let super50Flagged = 0; const failures = [];
     for (const r of rows) {
       if (r.final_rating == null) { failures.push({ employee_id: r.employee_id, reason: 'no rating at any layer' }); continue; }
       try {
@@ -433,6 +434,29 @@ router.post('/publish', async (req, res) => {
         await db.query(
           `INSERT INTO pms.closure_letters (tenant_id, cycle_id, employee_id) VALUES ($1,$2,$3)
            ON CONFLICT (cycle_id, employee_id) DO NOTHING`, [T(req), c.id, r.employee_id]);
+        // BR-6.5: Super 50 watchlist — recomputed from this employee's last 3
+        // published ANNUAL cycles (midyear publishes don't touch this; see
+        // rating-rules.js for the letter-grade mapping and why annual-only).
+        // A lapsed streak un-flags automatically — this is "currently on
+        // the watchlist", not a permanent badge.
+        if (c.cycle_type === 'annual') {
+          const hist = (await db.query(
+            `SELECT h.final_rating FROM pms.employee_performance_history h JOIN pms.cycles hc ON hc.id=h.cycle_id
+              WHERE h.tenant_id=$1 AND h.employee_id=$2 AND hc.cycle_type='annual'
+              ORDER BY h.published_at DESC LIMIT 3`, [T(req), r.employee_id])).rows;
+          const eligible = isSuper50Eligible(hist.map((x) => x.final_rating));
+          const emp = (await db.query(`SELECT super50_flag FROM core.employees WHERE id=$1`, [r.employee_id])).rows[0];
+          const wasFlagged = !!(emp && emp.super50_flag);
+          if (eligible && !wasFlagged) {
+            await db.query(`UPDATE core.employees SET super50_flag=true, super50_since=now() WHERE id=$1`, [r.employee_id]);
+            super50Flagged++;
+            audit(req, 'SUPER50_FLAGGED', c.id, r.employee_id, { ratings: hist.map((x) => x.final_rating) });
+            await notify(T(req), r.employee_id, 'super50_flagged', 'You have been recognised as a consistent top performer', null, '/pms/my-rating');
+          } else if (!eligible && wasFlagged) {
+            await db.query(`UPDATE core.employees SET super50_flag=false, super50_since=NULL WHERE id=$1`, [r.employee_id]);
+            audit(req, 'SUPER50_UNFLAGGED', c.id, r.employee_id, { ratings: hist.map((x) => x.final_rating) });
+          }
+        }
         // BR-7.1: automatic PIP trigger below the cycle's configured threshold.
         // ON CONFLICT DO NOTHING (unique on tenant/employee/cycle, migration
         // 006) makes this safe if publish is re-run — it won't reopen or
@@ -452,8 +476,8 @@ router.post('/publish', async (req, res) => {
         published++;
       } catch (e) { failures.push({ employee_id: r.employee_id, reason: e.message }); }
     }
-    audit(req, 'CYCLE_PUBLISHED', c.id, null, { published, failed: failures.length, pips_opened: pipsOpened });
-    res.json({ ok: true, published, pips_opened: pipsOpened, failures });
+    audit(req, 'CYCLE_PUBLISHED', c.id, null, { published, failed: failures.length, pips_opened: pipsOpened, super50_flagged: super50Flagged });
+    res.json({ ok: true, published, pips_opened: pipsOpened, super50_flagged: super50Flagged, failures });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -585,6 +609,23 @@ router.post('/pip/:id/entries', async (req, res) => {
     if (p.status === 'open') await db.query(`UPDATE pms.pip_records SET status='in_progress' WHERE id=$1`, [p.id]);
     await notify(T(req), p.employee_id, 'pip_entry_added', 'A new weekly note was added to your Performance Improvement Plan', null, '/pms/my-rating');
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------- Super 50 / High-Performer Watchlist — BR-6.5 -------------
+// HR/Management view (matches the BRD's Owner/Approver column for this
+// requirement). The flag itself is recomputed at /publish, above; this
+// route just surfaces who is currently on it, for retention/succession
+// planning. Retention Alerts (BR-6.6, next feature) reads this same flag.
+router.get('/watchlist', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const r = await db.query(
+      `SELECT e.id, e.name, e.email, e.department, e.designation, e.super50_since,
+              e.last_appraisal_rating, e.last_appraisal_at
+         FROM core.employees e WHERE e.tenant_id=$1 AND e.super50_flag=true
+        ORDER BY e.super50_since ASC`, [T(req)]);
+    res.json({ watchlist: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

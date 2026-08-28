@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -13,6 +13,7 @@ import EngagementPage from './pages/EngagementPage';
 import PeopleHubPage from './pages/PeopleHubPage';
 import DirectoryPage from './pages/DirectoryPage';
 import PIPPage from './pages/PIPPage';
+import WatchlistPage from './pages/WatchlistPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -29,6 +30,7 @@ const NAV = [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
     { to: '/admin/directory', label: 'Employees', icon: Upload },
+    { to: '/admin/watchlist', label: 'Super 50', icon: Award },
   ]},
   { group: 'Engagement & People', items: [
     { to: '/engagement', label: 'Engagement', icon: HeartHandshake },
@@ -84,6 +86,7 @@ export default function App() {
             <Route path="/admin/cycles" element={<CycleAdminPage />} />
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<DirectoryPage />} />
+            <Route path="/admin/watchlist" element={<WatchlistPage />} />
             <Route path="/engagement" element={<EngagementPage />} />
             <Route path="/people" element={<PeopleHubPage user={user} />} />
             <Route path="*" element={<Navigate to="/my/kras" replace />} />

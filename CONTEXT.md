@@ -14,6 +14,23 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Super 50 / High-Performer Watchlist built (BR-6.5)**.
+  migrations/007-super50.js adds core.employees.super50_flag/super50_since
+  (persisted, alongside the existing potential_rating/nine_box_cell
+  write-back columns, not computed fresh on read). Pure eligibility rule
+  in modules/performance/rating-rules.js — isSuper50Eligible() — unit
+  tested with no DB (7 tests). Recomputed at /publish for annual cycles
+  only (midyear publishes don't touch it): flags true only on the 3rd
+  consecutive top-tier (4=A or 5=A+) rating where the MOST RECENT one is
+  specifically 5=A+; unflags automatically the moment the streak breaks
+  (this is "currently on the watchlist", not a permanent badge). New
+  GET /pms/watchlist (HR/Management only, matches BRD Owner column) feeds
+  Retention Alerts (BR-6.6, next). Frontend: WatchlistPage.jsx (HR Admin >
+  Super 50). Verified live across 4 real published cycles (2 top-tier ->
+  not yet flagged -> 3rd cycle A+ -> flagged -> low rating -> unflagged);
+  test/super50.test.js codifies this + the "most recent must be A+ not
+  just A" edge case. 39/39 pass with DB attached (34/39, 5 skipped,
+  without).
 - 28-Aug-2026: **PIP module built (BR-7.1 auto-trigger + BR-7.2 weekly
   tracking through to closure)**. pms.pip_records existed since migration
   003 but had zero routes — nothing had ever written to it. Added:
