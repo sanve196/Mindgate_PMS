@@ -57,7 +57,7 @@ async function main() {
   app.listen(port, () => logger.info('agentic-pms up', { port, tenant: slug }));
 
   // BR-4.4: Quarterly Connect reminders. No separate worker/cron service
-  // in this deploy (deploy/render.yaml defines only api + frontend), so
+  // in this deploy (render.yaml defines only api + frontend), so
   // this runs in-process. Checked once at boot (catches anything overdue
   // since the last restart) and then daily. checkAndSendConnectReminders
   // itself is idempotent per employee (cooldown-gated via

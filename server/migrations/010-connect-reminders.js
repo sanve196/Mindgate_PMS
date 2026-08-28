@@ -1,7 +1,7 @@
 // 010 — Quarterly Connect reminders (BR-4.4: "automatic reminders prompt
 // managers and employees when a quarterly connect is due").
 //
-// This deploy has no separate worker/cron service (deploy/render.yaml
+// This deploy has no separate worker/cron service (render.yaml
 // defines only the api and frontend web services) — the reminder check
 // runs in-process (index.js, a daily setInterval) with a manual HR
 // trigger as a backup/testing path. This log table is how repeat sends

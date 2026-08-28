@@ -27,7 +27,7 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
   import.meta.env.VITE_API_URL (an absolute https://.../api/v1 URL) when
   set, falling back to the old relative /api/v1 for local dev. Every one
   of the 5 places that previously hardcoded /api/v1 now imports and uses
-  this one constant. deploy/render.yaml's frontend service gets
+  this one constant. render.yaml's frontend service gets
   VITE_API_URL injected at BUILD time (Vite bakes env vars into the
   static bundle at build, not runtime) via Render's fromService blueprint
   feature, pointed at the api service's host. Verified by building the
@@ -215,7 +215,7 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
   project-plan items 27-30/32 marked "Completed" for Mid-Year are as real
   as they claim, same pattern as Development Plan turned out not to be.
 - 28-Aug-2026: **Quarterly Connect reminders built (BR-4.4)**. No separate
-  worker/cron service exists in this deploy (deploy/render.yaml only
+  worker/cron service exists in this deploy (render.yaml only
   defines api + frontend web services), so this runs in-process: an
   interval in index.js checks once at boot and then daily, plus a manual
   HR-triggered POST /pms/connects/check-reminders as a backup/testing
