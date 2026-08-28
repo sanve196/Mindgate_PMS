@@ -9,6 +9,8 @@
 // row scope (my sheet, my team) in handlers per the security skill.
 
 const express = require('express');
+const multer = require('multer');
+const PDFDocument = require('pdfkit');
 const db = require('../../core/db');
 const logger = require('../../core/logger');
 const { authenticate } = require('../../core/auth');
@@ -480,6 +482,79 @@ router.post('/my/self-appraisal/submit', async (req, res) => {
     if (a.status === 'submitted') return res.status(409).json({ error: 'already submitted' });
     await db.query(`UPDATE pms.self_appraisals SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1`, [a.id]);
     audit(req, 'SELF_APPRAISAL_SUBMITTED', c.id, req.user.id, null);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------- Evidence upload — supports self-appraisal narratives ----
+// pms.evidence existed since migration 003 with nothing writing to it
+// ("Storage iface deferred to first upload need"). File bytes are stored
+// directly in Postgres (bytea) — see migrations/013-file-storage.js for
+// why, given Render's ephemeral filesystem and no object-storage
+// credentials configured in this environment.
+const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.post('/my/self-appraisal/evidence', (req, res, next) => evidenceUpload.single('file')(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.message });
+  next();
+}), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'file required (multipart field "file")' });
+    const c = await activeCycle(T(req));
+    if (!c) return res.status(409).json({ error: 'No active cycle' });
+    const a = (await db.query(`SELECT * FROM pms.self_appraisals WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+    if (!a) return res.status(404).json({ error: 'GET /my/self-appraisal first' });
+    if (a.status === 'submitted') return res.status(409).json({ error: 'Self-appraisal is submitted — cannot attach more evidence' });
+    const { kra_id } = req.body || {};
+    const row = (await db.query(
+      `INSERT INTO pms.evidence (tenant_id, appraisal_id, kra_id, filename, file_data, content_type, file_size)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, filename, kra_id, file_size, uploaded_at`,
+      [T(req), a.id, kra_id || null, req.file.originalname, req.file.buffer, req.file.mimetype, req.file.size])).rows[0];
+    res.json({ ok: true, evidence: row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/my/self-appraisal/evidence', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ evidence: [] });
+    const a = (await db.query(`SELECT id FROM pms.self_appraisals WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+    if (!a) return res.json({ evidence: [] });
+    const r = await db.query(
+      `SELECT id, filename, kra_id, content_type, file_size, uploaded_at FROM pms.evidence WHERE appraisal_id=$1 ORDER BY uploaded_at DESC`, [a.id]);
+    res.json({ evidence: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Shared download route — the evidence owner, their manager, or HR/admin
+// may download. Streams the bytes with the original filename/content-type.
+router.get('/evidence/:id/download', async (req, res) => {
+  try {
+    const row = (await db.query(
+      `SELECT ev.*, sa.employee_id, e.manager_id FROM pms.evidence ev
+         JOIN pms.self_appraisals sa ON sa.id=ev.appraisal_id
+         JOIN core.employees e ON e.id=sa.employee_id
+        WHERE ev.id=$1 AND ev.tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!row) return res.status(404).json({ error: 'evidence not found' });
+    const isOwner = row.employee_id === req.user.id;
+    const isManager = row.manager_id === req.user.id;
+    if (!isOwner && !isManager && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not authorised to view this evidence' });
+    if (!row.file_data) return res.status(404).json({ error: 'file data not found' });
+    res.setHeader('Content-Type', row.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.filename.replace(/"/g, '')}"`);
+    res.send(row.file_data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/my/self-appraisal/evidence/:id', async (req, res) => {
+  try {
+    const row = (await db.query(
+      `SELECT ev.id, sa.employee_id, sa.status FROM pms.evidence ev JOIN pms.self_appraisals sa ON sa.id=ev.appraisal_id
+        WHERE ev.id=$1 AND ev.tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!row) return res.status(404).json({ error: 'evidence not found' });
+    if (row.employee_id !== req.user.id) return res.status(403).json({ error: 'Not your evidence' });
+    if (row.status === 'submitted') return res.status(409).json({ error: 'Self-appraisal is submitted — cannot remove evidence' });
+    await db.query(`DELETE FROM pms.evidence WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1269,6 +1344,107 @@ router.get('/watchlist', async (req, res) => {
          FROM core.employees e WHERE e.tenant_id=$1 AND e.super50_flag=true
         ORDER BY e.super50_since ASC`, [T(req)]);
     res.json({ watchlist: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------- Closure letter PDF generation -----------------------------
+// A closure_letters row is created (record only, no PDF) at /publish
+// above — the branded PDF itself was explicitly deferred ("Phase 4
+// template engine decision", per this file's header comment). This
+// closes that: HR reviews/edits the AI-drafted text (POST /agentic/
+// letter-draft — a DRAFT only, never auto-applied, matching the AI
+// human-approval safeguard) and explicitly triggers PDF generation with
+// the final wording. The rating/label are read directly from the
+// published history row, never re-typed, so the PDF cannot state a
+// different number than what was actually published.
+// HR-facing list: everyone with a closure_letters record for the active
+// cycle (created automatically at /publish), showing whether the PDF
+// has been generated yet.
+router.get('/closure-letters', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'letters_admin')) && !(await hasPermission(req.user, 'pms_admin'))) {
+      return res.status(403).json({ error: "Requires 'letters_admin' or 'pms_admin'" });
+    }
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, letters: [] });
+    const r = await db.query(
+      `SELECT cl.employee_id, cl.cycle_id, e.name AS employee_name, h.final_rating, h.rating_label,
+              (cl.file_data IS NOT NULL) AS generated, cl.generated_at
+         FROM pms.closure_letters cl JOIN core.employees e ON e.id=cl.employee_id
+         LEFT JOIN pms.employee_performance_history h ON h.employee_id=cl.employee_id AND h.cycle_id=cl.cycle_id
+        WHERE cl.tenant_id=$1 AND cl.cycle_id=$2 ORDER BY e.name`, [T(req), c.id]);
+    res.json({ cycle: { id: c.id, name: c.name }, letters: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/closure-letters/:employeeId/:cycleId/generate', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'letters_admin')) && !(await hasPermission(req.user, 'pms_admin'))) {
+      return res.status(403).json({ error: "Requires 'letters_admin' or 'pms_admin'" });
+    }
+    const { salutation, body_paragraphs, closing_line } = req.body || {};
+    if (!salutation || !Array.isArray(body_paragraphs) || !body_paragraphs.length || !closing_line) {
+      return res.status(400).json({ error: 'salutation, body_paragraphs (non-empty array), and closing_line are required' });
+    }
+    const h = (await db.query(
+      `SELECT h.final_rating, h.rating_label, c.name AS cycle_name, c.fiscal_year, e.name AS employee_name, e.designation
+         FROM pms.employee_performance_history h JOIN pms.cycles c ON c.id=h.cycle_id JOIN core.employees e ON e.id=h.employee_id
+        WHERE h.tenant_id=$1 AND h.employee_id=$2 AND h.cycle_id=$3`,
+      [T(req), req.params.employeeId, req.params.cycleId])).rows[0];
+    if (!h) return res.status(404).json({ error: 'No published rating for this employee/cycle — publish first' });
+    const tenant = (await db.query(`SELECT name FROM core.tenants WHERE id=$1`, [T(req)])).rows[0];
+
+    const doc = new PDFDocument({ margin: 60 });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    const pdfDone = new Promise((resolve) => doc.on('end', resolve));
+
+    doc.fontSize(18).text(tenant.name, { align: 'center' });
+    doc.moveDown(0.3).fontSize(11).fillColor('#666').text('Performance Cycle Closure Letter', { align: 'center' });
+    doc.moveDown(1.5).fillColor('#000').fontSize(11);
+    doc.text(`${h.cycle_name} (${h.fiscal_year})`);
+    doc.text(`${h.employee_name}${h.designation ? ' — ' + h.designation : ''}`);
+    doc.moveDown(1);
+    doc.text(salutation);
+    doc.moveDown(0.8);
+    for (const p of body_paragraphs) { doc.text(p, { align: 'justify' }); doc.moveDown(0.6); }
+    doc.moveDown(0.4);
+    doc.font('Helvetica-Bold').text(`Final Rating: ${h.final_rating} — ${h.rating_label}`);
+    doc.font('Helvetica').moveDown(1);
+    doc.text(closing_line);
+    doc.moveDown(2);
+    doc.text(tenant.name, { align: 'left' });
+    doc.end();
+    await pdfDone;
+    const pdfBuffer = Buffer.concat(chunks);
+
+    await db.query(
+      `UPDATE pms.closure_letters SET file_data=$1, content_type='application/pdf', generated_by=$2, generated_at=now()
+        WHERE tenant_id=$3 AND employee_id=$4 AND cycle_id=$5`,
+      [pdfBuffer, req.user.email, T(req), req.params.employeeId, req.params.cycleId]);
+    audit(req, 'CLOSURE_LETTER_GENERATED', req.params.cycleId, req.params.employeeId, { bytes: pdfBuffer.length });
+    await notify(T(req), req.params.employeeId, 'closure_letter_ready', `Your ${h.cycle_name} closure letter is ready`, null, '/pms/my-rating');
+    res.json({ ok: true, bytes: pdfBuffer.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/closure-letters/:employeeId/:cycleId/download', async (req, res) => {
+  try {
+    const employeeId = req.params.employeeId === 'me' ? req.user.id : req.params.employeeId;
+    const row = (await db.query(
+      `SELECT cl.*, e.manager_id FROM pms.closure_letters cl JOIN core.employees e ON e.id=cl.employee_id
+        WHERE cl.tenant_id=$1 AND cl.employee_id=$2 AND cl.cycle_id=$3`,
+      [T(req), employeeId, req.params.cycleId])).rows[0];
+    if (!row) return res.status(404).json({ error: 'no closure letter record' });
+    const isOwner = row.employee_id === req.user.id;
+    const isManager = row.manager_id === req.user.id;
+    if (!isOwner && !isManager && !(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'letters_admin'))) {
+      return res.status(403).json({ error: 'Not authorised' });
+    }
+    if (!row.file_data) return res.status(404).json({ error: 'PDF not generated yet' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="closure-letter.pdf"`);
+    res.send(row.file_data);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

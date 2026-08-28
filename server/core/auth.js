@@ -48,9 +48,14 @@ async function devLogin(req, res) {
 }
 
 // Middleware: verify JWT, attach req.user. 401 on anything invalid.
+// Accepts the token via the standard Authorization header (every normal
+// API call) OR a ?token= query param, as a fallback ONLY for plain <a
+// href> download links (file downloads, evidence/closure-letter PDFs)
+// that can't attach custom headers — everywhere else in the app still
+// uses the header.
 function authenticate(req, res, next) {
   const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  const token = h.startsWith('Bearer ') ? h.slice(7) : (req.query.token || null);
   if (!token) return res.status(401).json({ error: 'Authentication required' });
   try {
     const claims = jwt.verify(token, JWT_SECRET);

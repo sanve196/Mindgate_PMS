@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Paperclip, Trash2, Download } from 'lucide-react';
 import { api, phaseLabel, phaseColor } from '../utils/api';
 
 export default function SelfAppraisalPage() {
@@ -67,12 +67,52 @@ export default function SelfAppraisalPage() {
         <label className="lbl">What could improve</label>
         <textarea className="inp" rows={3} value={f.could_improve} onChange={setField('could_improve')} disabled={!open} />
       </div>
+      <EvidenceSection editable={open} />
       {open && (
         <button className="btn-pri" onClick={async () => {
           try { await api('/pms/my/self-appraisal/submit', { method: 'POST' }); location.reload(); }
           catch (e) { setErr(e.message); }
         }}><Send size={13} className="inline mr-1" />Submit — locks your appraisal</button>
       )}
+    </div>
+  );
+}
+
+function EvidenceSection({ editable }) {
+  const [files, setFiles] = useState(null);
+  const [err, setErr] = useState(null);
+  const load = () => api('/pms/my/self-appraisal/evidence').then(r => setFiles(r.evidence)).catch(e => setErr(e.message));
+  useEffect(() => { load(); }, []);
+
+  const onUpload = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setErr(null);
+    const fd = new FormData(); fd.append('file', file);
+    try { await api('/pms/my/self-appraisal/evidence', { method: 'POST', body: fd }); load(); }
+    catch (err2) { setErr(err2.message); }
+  };
+  const remove = async (id) => {
+    try { await api(`/pms/my/self-appraisal/evidence/${id}`, { method: 'DELETE' }); load(); }
+    catch (e2) { setErr(e2.message); }
+  };
+  const token = localStorage.getItem('apms_token');
+
+  return (
+    <div className="card p-3 space-y-2">
+      <label className="lbl">Supporting evidence</label>
+      {(files || []).map(f => (
+        <div key={f.id} className="flex items-center justify-between text-xs bg-stone-50 rounded-lg px-2 py-1.5">
+          <span className="flex items-center gap-1"><Paperclip size={12} className="text-slate-400" />{f.filename} <span className="text-slate-400">({Math.round(f.file_size / 1024)} KB)</span></span>
+          <span className="flex items-center gap-1">
+            <a href={`/api/v1/pms/evidence/${f.id}/download?token=${token}`} className="btn-sec !p-1" target="_blank" rel="noreferrer"><Download size={12} /></a>
+            {editable && <button className="btn-sec !p-1" onClick={() => remove(f.id)}><Trash2 size={12} /></button>}
+          </span>
+        </div>
+      ))}
+      {editable && <input type="file" onChange={onUpload} className="text-xs" />}
+      {err && <p className="text-xs text-rose-600">{err}</p>}
     </div>
   );
 }

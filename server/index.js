@@ -46,6 +46,7 @@ async function main() {
 
   app.use('/api/v1/employees', employees.router);
   app.use('/api/v1/consent', require('./core/consent').router);
+  app.use('/api/v1/gdpr', require('./core/gdpr').router);
   app.use('/api/v1/notifications', require('./core/notifications').router);
   app.use('/api/v1/pms', require('./modules/performance').router);
   app.use('/api/v1/engagement', require('./modules/engagement').router);

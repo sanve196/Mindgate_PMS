@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -22,6 +22,7 @@ import AnnualReviewPage from './pages/AnnualReviewPage';
 import PulseCheckPage from './pages/PulseCheckPage';
 import MidYearReviewPage from './pages/MidYearReviewPage';
 import ConnectsPage from './pages/ConnectsPage';
+import ClosureLettersPage from './pages/ClosureLettersPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -44,6 +45,7 @@ const NAV = [
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
     { to: '/admin/directory', label: 'Employees', icon: Upload },
     { to: '/admin/kra-overview', label: 'KRA Overview', icon: ClipboardList },
+    { to: '/admin/closure-letters', label: 'Closure Letters', icon: FileText },
     { to: '/admin/watchlist', label: 'Super 50', icon: Award },
     { to: '/admin/nine-box', label: '9-Box Grid', icon: Grid3x3 },
   ]},
@@ -110,6 +112,7 @@ export default function App() {
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<DirectoryPage />} />
             <Route path="/admin/kra-overview" element={<KraOrgOverviewPage />} />
+            <Route path="/admin/closure-letters" element={<ClosureLettersPage />} />
             <Route path="/admin/watchlist" element={<WatchlistPage />} />
             <Route path="/admin/nine-box" element={<NineBoxPage />} />
             <Route path="/engagement" element={<EngagementPage />} />

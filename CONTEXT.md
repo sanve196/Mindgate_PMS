@@ -14,6 +14,59 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Closed the 3 concrete remaining gaps from the last audit
+  pass** (calendar integration stays deliberately deferred; broad "GDPR
+  compliance" and "bi-directional HRMS" aren't fully closeable without
+  external systems, but their concrete, buildable pieces now are):
+  1. **Evidence upload** — pms.evidence existed since migration 003 with
+     nothing writing to it. New POST/GET /pms/my/self-appraisal/evidence,
+     DELETE .../evidence/:id, shared GET /pms/evidence/:id/download
+     (owner, their manager, or admin). Frontend: upload/list/delete/
+     download wired into SelfAppraisalPage.jsx.
+  2. **Closure letter PDF generation** — closed the "Phase 4 template
+     engine decision" this file's own header comment had flagged as
+     deferred. Added pdfkit (no vulnerabilities beyond the pre-existing
+     uuid/exceljs transitive advisory). HR reviews/edits the existing
+     AI-drafted letter text (never auto-applied — same human-approval
+     safeguard as every other agentic feature), then POST
+     /pms/closure-letters/:employeeId/:cycleId/generate renders a real
+     PDF (rating/label read directly from the published history row,
+     never re-typed, so the letter cannot state a different number than
+     what was actually published) and stores it. New GET
+     /pms/closure-letters (HR list) and .../download (owner/manager/HR;
+     "me" as employeeId resolves to the caller). Frontend:
+     ClosureLettersPage.jsx (HR Admin > Closure Letters) — draft, edit
+     inline, generate; MyRatingPage.jsx gained a per-cycle download link.
+  3. **GDPR data export (Article 15, right of access)** — new core/gdpr.js,
+     GET /gdpr/export (self) and /gdpr/export/:employeeId (HR), aggregating
+     every table holding personal data about one employee into a single
+     JSON. Deliberately did NOT attempt automated erasure (Article 17) —
+     cascading deletes across a live system with audit/legal-retention
+     obligations is a policy decision for HR/legal, not a safe self-service
+     button. MyRatingPage.jsx gained a "Download all my data" link.
+  STORAGE CHOICE (documented in migrations/013-file-storage.js): both
+  evidence and closure-letter PDFs are stored as bytea IN POSTGRES, not
+  on local disk (Render's web services have an EPHEMERAL filesystem —
+  anything written there is lost on restart/redeploy) and not in an
+  external object store (no credentials configured in this environment).
+  Reasonable for POC volume; flagged as worth revisiting for a
+  high-volume production deployment.
+  SECURITY-RELEVANT CHANGE: core/auth.js's authenticate() now also
+  accepts a ?token= query param, as a fallback ONLY for plain <a href>
+  download links which can't attach an Authorization header — the
+  header path is completely unchanged for every other call in the app.
+  Tested explicitly (test/auth-query-token.test.js): header path
+  unaffected, query fallback works, no token still 401s, a bogus query
+  token is rejected rather than silently ignored. This touches the most
+  foundational function in the app, so the full suite was run
+  immediately after the change and confirmed zero regressions before
+  building anything on top of it.
+  Testing: 3 new integration test files (evidence-upload, closure-letter-pdf
+  — including a direct check that downloaded bytes start with the actual
+  %PDF magic number, not just a correctly-labelled empty response —
+  gdpr-export) plus the auth test above. Verified with a clean frontend
+  production build and a full fresh-database migration run (0->13).
+  103/103 tests pass with DB attached (48/103, 55 skipped, without).
 - 28-Aug-2026: **Full BRD re-audit against actual code** (not prior notes)
   — re-read the BRD/plan verbatim and grepped/read actual route files for
   every BR item, rather than trusting CONTEXT.md's own earlier summaries.
