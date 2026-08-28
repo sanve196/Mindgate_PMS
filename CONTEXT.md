@@ -14,6 +14,49 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **One-time admin bootstrap built (core/setup.js)** — a fresh
+  deployment had no way to create ANY account: production has AUTH_DEV=false
+  (correctly), and dev-login is the only login route in the codebase at
+  all (real SSO/Azure-AD, referenced in core/auth.js's own comments as
+  the intended production auth, was never actually built). Without this,
+  nobody could log in to create a user, and the person deploying
+  shouldn't be handed a password chosen — and therefore known — by
+  anyone else. New unauthenticated GET /api/v1/setup/status and POST
+  /api/v1/setup/bootstrap-admin: the caller supplies their OWN name/
+  email/password (min 8 chars), which is bcrypt-hashed immediately and
+  never logged/echoed back. Safety model: this route requires no auth
+  (nothing to authenticate against yet) so it relies entirely on one
+  guard — it only works when the tenant currently has ZERO employees,
+  checked and enforced inside a transaction holding a Postgres advisory
+  lock (pg_advisory_xact_lock keyed on the tenant id) so concurrent
+  requests can't race past the check together. The moment one employee
+  exists (including the admin just created), it permanently locks itself
+  out for that tenant — same "first user becomes admin" pattern as many
+  self-hosted apps (e.g. GitLab's first-login sets the root password),
+  not a standing admin-creation backdoor.
+  test/setup-bootstrap.test.js: 5 integration tests, including one that
+  actually fires 3 simultaneous bootstrap attempts at a fresh tenant via
+  Promise.all and confirms exactly one succeeds — proving the advisory
+  lock holds under real concurrency, not just sequential calls. HIT AND
+  FIXED A REAL BUG WHILE WRITING THIS: the test file initially omitted
+  setting process.env.JWT_SECRET before requiring core/auth (every other
+  integration test file in this project does this explicitly; this one
+  didn't) — running it standalone hung indefinitely rather than failing
+  loudly, because core/auth.js's devLogin has no try/catch around an
+  async handler, so an unset-secret failure inside jsonwebtoken never
+  sent an HTTP response and the client's fetch() waited forever. Root-
+  caused via a manual debug script outside node:test (isolated the exact
+  same bootstrap+login flow, worked fine with JWT_SECRET set in the
+  shell, confirming the missing env var — not the route logic — was the
+  cause) before fixing the test file. This surfaced a real, pre-existing
+  latent fragility in devLogin itself — fixed in the same commit, not
+  left for later: wrapped the whole handler in try/catch, so any
+  unexpected failure now returns a proper 500 with a logged reason
+  instead of hanging the caller's connection forever. Verified directly:
+  reran the exact previously-hanging scenario (no JWT_SECRET set) and
+  confirmed it now responds in ~100ms with a 500 instead of hanging.
+  113/113 tests pass with DB attached (53/113, 60 skipped, without).
+  Pushed to both remotes.
 - 28-Aug-2026: **First real Render deploy attempt surfaced two genuine
   infra issues, both fixed** (this is the first time this app has
   actually been deployed to Render, not just tested locally):

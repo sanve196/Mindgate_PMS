@@ -46,6 +46,7 @@ async function main() {
   app.get('/api/v1/me', authenticate, (req, res) => res.json({ user: req.user }));
 
   app.use('/api/v1/employees', employees.router);
+  app.use('/api/v1/setup', require('./core/setup').router);
   app.use('/api/v1/consent', require('./core/consent').router);
   app.use('/api/v1/gdpr', require('./core/gdpr').router);
   app.use('/api/v1/notifications', require('./core/notifications').router);

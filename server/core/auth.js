@@ -32,19 +32,32 @@ async function principalByEmail(tenantId, email) {
 }
 
 // POST /auth/dev-login {email, password} — enabled only when AUTH_DEV=true.
+//
+// Wrapped in try/catch deliberately: found during a live debugging
+// session that any unexpected failure inside this async handler (e.g. a
+// missing JWT_SECRET) previously went unhandled — Express doesn't
+// auto-catch async route errors, so the request never got ANY response
+// and the caller's connection just hung indefinitely instead of failing
+// fast with a clear error. This is the one login route that actually
+// exists right now, so it hanging silently is worse than most.
 async function devLogin(req, res) {
-  if (process.env.AUTH_DEV !== 'true') return res.status(404).json({ error: 'not found' });
-  const { email, password } = req.body || {};
-  const tenantId = req.tenantId;
-  const cred = (await db.query(
-    `SELECT password_hash FROM core.local_credentials WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`,
-    [tenantId, email || ''])).rows[0];
-  if (!cred || !(await bcrypt.compare(password || '', cred.password_hash))) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+  try {
+    if (process.env.AUTH_DEV !== 'true') return res.status(404).json({ error: 'not found' });
+    const { email, password } = req.body || {};
+    const tenantId = req.tenantId;
+    const cred = (await db.query(
+      `SELECT password_hash FROM core.local_credentials WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`,
+      [tenantId, email || ''])).rows[0];
+    if (!cred || !(await bcrypt.compare(password || '', cred.password_hash))) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const p = await principalByEmail(tenantId, email);
+    if (p.error) return res.status(403).json({ error: p.error === 'inactive' ? 'Account inactive' : 'No employee record' });
+    res.json({ token: sign(p.user), user: p.user });
+  } catch (e) {
+    logger.error('dev-login failed', { error: e.message });
+    res.status(500).json({ error: 'Login failed unexpectedly' });
   }
-  const p = await principalByEmail(tenantId, email);
-  if (p.error) return res.status(403).json({ error: p.error === 'inactive' ? 'Account inactive' : 'No employee record' });
-  res.json({ token: sign(p.user), user: p.user });
 }
 
 // Middleware: verify JWT, attach req.user. 401 on anything invalid.
