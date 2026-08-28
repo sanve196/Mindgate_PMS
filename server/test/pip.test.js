@@ -28,6 +28,7 @@ before(async () => {
   const slug = process.env.TENANT_SLUG;
   const t = (await db.query(`INSERT INTO core.tenants (name, slug) VALUES ($1,$1) RETURNING id`, [slug])).rows[0];
   await require('../migrations/002-default-permission-bundles').ensureTenantSeeds(db, t.id);
+  await require('../migrations/008-review-parameters').ensureDefaultParameters(db, t.id);
 
   const mgr = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'PIP Mgr','pip-mgr@x.com','active') RETURNING id`, [t.id])).rows[0];
   const emp = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status, manager_id) VALUES ($1,'PIP Emp','pip-emp@x.com','active',$2) RETURNING id`, [t.id, mgr.id])).rows[0];
@@ -65,6 +66,17 @@ async function api(path, token, opts = {}) {
   return { status: r.status, body: await r.json() };
 }
 
+// Scores every active review parameter to the same value, which makes the
+// weighted average equal that value regardless of individual weights
+// (sum(weight_i * X)/100 = X * sum(weight_i)/100 = X, since weights sum to
+// 100) — the clean way for a test to land on an exact overall_rating via
+// the (now mandatory, for annual cycles) 7-parameter engine.
+async function scoreAllParamsTo(mgrTok, employeeId, value) {
+  const plist = await api('/pms/review-parameters', mgrTok);
+  const scores = Object.fromEntries(plist.body.parameters.map((p) => [p.id, value]));
+  return api(`/pms/team/parameter-scores/${employeeId}`, mgrTok, { method: 'PUT', body: JSON.stringify({ scores }) });
+}
+
 test('PIP: full lifecycle — auto-trigger on publish, manager-only writes, mandatory closure reason, idempotent re-publish', { skip }, async () => {
   const { empId } = global.__pip_test_state;
   const hrAuth = await login('pip-hr@x.com');
@@ -80,7 +92,8 @@ test('PIP: full lifecycle — auto-trigger on publish, manager-only writes, mand
     await api(`/pms/cycles/${cycleId}/phase`, hrTok, { method: 'POST', body: JSON.stringify({ to: phase }) });
   }
 
-  await api(`/pms/team/evaluations/${empId}`, mgrTok, { method: 'PUT', body: JSON.stringify({ overall_rating: 2.0, strengths: 'x', improvement_areas: 'y' }) });
+  await scoreAllParamsTo(mgrTok, empId, 2.0);
+  await api(`/pms/team/evaluations/${empId}`, mgrTok, { method: 'PUT', body: JSON.stringify({ strengths: 'x', improvement_areas: 'y' }) });
   await api(`/pms/team/evaluations/${empId}/submit`, mgrTok, { method: 'POST' });
 
   for (const phase of ['hod_eval', 'calibration', 'publish']) {

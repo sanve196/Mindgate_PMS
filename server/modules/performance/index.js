@@ -15,7 +15,7 @@ const { authenticate } = require('../../core/auth');
 const { apiPermissionParity, hasPermission } = require('../../core/permissions');
 const { notify } = require('../../core/notifications');
 const { requireConsent } = require('../../core/consent');
-const { isSuper50Eligible } = require('./rating-rules');
+const { isSuper50Eligible, computeWeightedRating } = require('./rating-rules');
 const pm = require('./phase-machine');
 
 const router = express.Router();
@@ -273,7 +273,7 @@ router.get('/team/evaluations', async (req, res) => {
          LEFT JOIN pms.manager_evaluations me ON me.cycle_id=$1 AND me.employee_id=e.id
         WHERE e.tenant_id=$2 AND e.manager_id=$3 AND e.status='active' ORDER BY e.name`,
       [c.id, T(req), req.user.id]);
-    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase, rating_scale: c.rating_scale }, team: r.rows });
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase, rating_scale: c.rating_scale, cycle_type: c.cycle_type }, team: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -286,6 +286,14 @@ router.put('/team/evaluations/:employeeId', async (req, res) => {
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const b = req.body || {};
+    // BR-6.2/6.3: on an ANNUAL cycle the overall rating must come from the
+    // 7-parameter weighted engine (PUT /team/parameter-scores/:id), not a
+    // directly typed number — otherwise the weighting requirement is just
+    // a UI suggestion nobody has to follow. Mid-Year's own, separate
+    // self+manager rating (BR-5.4) is unaffected; only annual is gated.
+    if (c.cycle_type === 'annual' && b.overall_rating !== undefined) {
+      return res.status(409).json({ error: 'On an annual cycle, overall_rating is computed from the 7 organisational parameters — use PUT /pms/team/parameter-scores/:employeeId instead' });
+    }
     await db.query(
       `INSERT INTO pms.manager_evaluations (tenant_id, cycle_id, employee_id, manager_id, entries, overall_rating, strengths, improvement_areas, status)
        VALUES ($1,$2,$3,$4,COALESCE($5,'{}'::jsonb),$6,$7,$8,'pending')
@@ -296,7 +304,7 @@ router.put('/team/evaluations/:employeeId', async (req, res) => {
          improvement_areas=COALESCE($8,pms.manager_evaluations.improvement_areas),
          updated_at=now()`,
       [T(req), c.id, emp.id, req.user.id, b.entries ? JSON.stringify(b.entries) : null,
-       b.overall_rating ?? null, b.strengths ?? null, b.improvement_areas ?? null]);
+       c.cycle_type === 'annual' ? null : (b.overall_rating ?? null), b.strengths ?? null, b.improvement_areas ?? null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -312,6 +320,133 @@ router.post('/team/evaluations/:employeeId/submit', async (req, res) => {
     await db.query(`UPDATE pms.manager_evaluations SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1`, [ev.id]);
     audit(req, 'MANAGER_EVAL_SUBMITTED', c.id, req.params.employeeId, { rating: ev.overall_rating });
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------- 7 Organizational Parameters — BR-6.2/BR-6.3 --------------
+// Configuration (HR) and per-employee scoring (manager) for the Annual
+// Review's weighted rating. See migrations/008-review-parameters.js for
+// why this is annual-only and why the weights are configurable defaults.
+
+// Any authenticated user can view the current parameter set — a manager
+// needs to know what to score against, HR needs to see what they've
+// configured, and there's nothing sensitive in the list itself.
+router.get('/review-parameters', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT id, name, weight_pct, sort_order FROM pms.review_parameters
+        WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [T(req)]);
+    res.json({ parameters: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// HR configures the 7 parameters' names/weights (BR-6.2: "HR can configure
+// the 7 organisational parameters and their weightings"). Full replace of
+// the active set in one call — simpler and safer than partial-patch
+// semantics for something that must sum to 100 as a whole. Reuses
+// phase-machine's weightsValid() so both KRAs and review parameters are
+// held to the exact same "sums to 100 within 0.01" rule.
+router.put('/review-parameters', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const { parameters } = req.body || {};
+    if (!Array.isArray(parameters) || !parameters.length) return res.status(400).json({ error: 'parameters (non-empty array) required' });
+    for (const p of parameters) {
+      if (!p.name || !p.name.trim()) return res.status(400).json({ error: 'each parameter needs a name' });
+      if (typeof p.weight_pct !== 'number' || p.weight_pct <= 0) return res.status(400).json({ error: `${p.name}: weight_pct must be a positive number` });
+    }
+    const check = pm.weightsValid(parameters.map((p) => ({ weight: p.weight_pct })));
+    if (!check.ok) return res.status(422).json({ error: `Weights must sum to 100 (currently ${check.total})` });
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE pms.review_parameters SET active=false WHERE tenant_id=$1`, [T(req)]);
+      for (let i = 0; i < parameters.length; i++) {
+        const p = parameters[i];
+        if (p.id) {
+          await client.query(
+            `UPDATE pms.review_parameters SET name=$1, weight_pct=$2, sort_order=$3, active=true, updated_at=now()
+              WHERE id=$4 AND tenant_id=$5`, [p.name.trim(), p.weight_pct, (i + 1) * 10, p.id, T(req)]);
+        } else {
+          await client.query(
+            `INSERT INTO pms.review_parameters (tenant_id, name, weight_pct, sort_order) VALUES ($1,$2,$3,$4)`,
+            [T(req), p.name.trim(), p.weight_pct, (i + 1) * 10]);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+    finally { client.release(); }
+    audit(req, 'REVIEW_PARAMETERS_UPDATED', null, null, { count: parameters.length });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manager fetches the parameter list + their current scores for one
+// report, plus the live weighted rating computed from whatever is scored
+// so far (Fig. 8b's "live-recalculating weighted overall rating").
+router.get('/team/parameter-scores/:employeeId', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.status(409).json({ error: 'No active cycle' });
+    if (c.cycle_type !== 'annual') return res.status(409).json({ error: '7-parameter scoring applies to annual cycles only' });
+    const emp = (await db.query(`SELECT id, manager_id, name FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const params = (await db.query(`SELECT id, name, weight_pct, sort_order FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [T(req)])).rows;
+    const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, emp.id])).rows;
+    const scoreMap = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
+    const weighted = computeWeightedRating(params, scoreMap);
+    res.json({ employee: { id: emp.id, name: emp.name }, parameters: params, scores: scoreMap, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manager submits/updates one or more parameter scores for a report.
+// Recomputes the weighted rating across ALL active parameters every call
+// and, once every parameter is scored, writes it straight into
+// pms.manager_evaluations.overall_rating — the exact same column PIP,
+// Super 50, 9-Box, and publish already read, so nothing downstream needed
+// to change to consume a 7-parameter-derived rating instead of a
+// manager-typed one. While incomplete, overall_rating is left untouched
+// (COALESCE semantics already in the /team/evaluations route mean a null
+// here doesn't clobber anything).
+router.put('/team/parameter-scores/:employeeId', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'manager_edit')) return res.status(409).json({ error: `Manager evaluation is not open (phase: ${c ? c.phase : 'none'})` });
+    if (c.cycle_type !== 'annual') return res.status(409).json({ error: '7-parameter scoring applies to annual cycles only' });
+    const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const { scores } = req.body || {}; // { parameter_id: score, ... } — partial updates allowed
+    if (!scores || typeof scores !== 'object') return res.status(400).json({ error: 'scores object required, e.g. {"<parameter_id>": 4}' });
+    const params = (await db.query(`SELECT id, name, weight_pct FROM pms.review_parameters WHERE tenant_id=$1 AND active=true`, [T(req)])).rows;
+    const validIds = new Set(params.map((p) => p.id));
+    for (const [pid, val] of Object.entries(scores)) {
+      if (!validIds.has(pid)) return res.status(400).json({ error: `unknown parameter_id: ${pid}` });
+      const n = Number(val);
+      if (Number.isNaN(n) || n < 1 || n > 5) return res.status(400).json({ error: `score for ${pid} must be a number between 1 and 5` });
+    }
+    for (const [pid, val] of Object.entries(scores)) {
+      await db.query(
+        `INSERT INTO pms.parameter_scores (tenant_id, cycle_id, employee_id, parameter_id, score, scored_by)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (cycle_id, employee_id, parameter_id) DO UPDATE SET score=EXCLUDED.score, scored_by=EXCLUDED.scored_by, updated_at=now()`,
+        [T(req), c.id, emp.id, pid, Number(val), req.user.email]);
+    }
+    const allScored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, emp.id])).rows;
+    const scoreMap = Object.fromEntries(allScored.map((s) => [s.parameter_id, Number(s.score)]));
+    const weighted = computeWeightedRating(params, scoreMap);
+    if (weighted.complete) {
+      await db.query(
+        `INSERT INTO pms.manager_evaluations (tenant_id, cycle_id, employee_id, manager_id, overall_rating, status)
+         VALUES ($1,$2,$3,$4,$5,'pending')
+         ON CONFLICT (cycle_id, employee_id) DO UPDATE SET overall_rating=$5, updated_at=now()`,
+        [T(req), c.id, emp.id, req.user.id, weighted.rating]);
+    }
+    audit(req, 'PARAMETER_SCORES_UPDATED', c.id, emp.id, { scores, complete: weighted.complete, weighted_rating: weighted.rating });
+    res.json({ ok: true, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

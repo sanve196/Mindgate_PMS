@@ -33,6 +33,7 @@ async function main() {
   // was found by actually running the app against a real Postgres for the
   // first time. Idempotent (ON CONFLICT DO NOTHING), safe on every boot.
   await require('./migrations/002-default-permission-bundles').ensureTenantSeeds(db, TENANT_ID);
+  await require('./migrations/008-review-parameters').ensureDefaultParameters(db, TENANT_ID);
 
   const app = express();
   app.use(cors());

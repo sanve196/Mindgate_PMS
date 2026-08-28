@@ -29,14 +29,14 @@ export default function TeamEvalPage() {
             <span className={`chip ${t.self_status === 'submitted' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>self: {t.self_status || 'not started'}</span>
             <span className={`chip ${t.eval_status === 'submitted' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-slate-600'}`}>eval: {t.eval_status || 'pending'}</span>
           </button>
-          {openId === t.employee_id && <EvalEditor t={t} phase={data.cycle.phase} scale={data.cycle.rating_scale} reload={load} />}
+          {openId === t.employee_id && <EvalEditor t={t} phase={data.cycle.phase} scale={data.cycle.rating_scale} cycleType={data.cycle.cycle_type} reload={load} />}
         </div>
       ))}
     </div>
   );
 }
 
-function EvalEditor({ t, phase, scale, reload }) {
+function EvalEditor({ t, phase, scale, cycleType, reload }) {
   const [f, setF] = useState({ overall_rating: t.overall_rating ?? '', strengths: t.strengths || '', improvement_areas: t.improvement_areas || '' });
   const [state, setState] = useState('idle');
   const [err, setErr] = useState(null);
@@ -72,13 +72,19 @@ function EvalEditor({ t, phase, scale, reload }) {
           {t.could_improve && <p><b>Could improve:</b> {t.could_improve}</p>}
         </div>
       )}
+      {cycleType === 'annual' ? (
+        <ParameterScoring employeeId={t.employee_id} editable={editable} initialRating={t.overall_rating} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="lbl mb-0">Overall rating *</label>
+          <select className="inp w-auto" value={f.overall_rating} disabled={!editable}
+            onChange={(e) => { setF(s => ({ ...s, overall_rating: e.target.value })); persist({ overall_rating: e.target.value === '' ? null : Number(e.target.value) }); }}>
+            <option value="">—</option>
+            {(scale || []).map(s => <option key={s.value} value={s.value}>{s.value} · {s.label}</option>)}
+          </select>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
-        <label className="lbl mb-0">Overall rating *</label>
-        <select className="inp w-auto" value={f.overall_rating} disabled={!editable}
-          onChange={(e) => { setF(s => ({ ...s, overall_rating: e.target.value })); persist({ overall_rating: e.target.value === '' ? null : Number(e.target.value) }); }}>
-          <option value="">—</option>
-          {(scale || []).map(s => <option key={s.value} value={s.value}>{s.value} · {s.label}</option>)}
-        </select>
         {editable && (
           <button className="btn-sec" disabled={drafting} onClick={askDraft}>
             <Sparkles size={13} className="inline mr-1 text-amber-500" />{drafting ? 'Drafting…' : 'Draft the writing'}
@@ -109,6 +115,50 @@ function EvalEditor({ t, phase, scale, reload }) {
           catch (e) { setErr(e.message); }
         }}><Send size={13} className="inline mr-1" />Submit evaluation</button>
       )}
+    </div>
+  );
+}
+
+// BR-6.2/6.3: on an annual cycle the overall rating is computed from the 7
+// Organizational Driver parameters, not typed directly — this replaces the
+// plain rating <select> for annual cycles. Every parameter must be scored
+// before the weighted rating counts as complete (and only then does it
+// flow into overall_rating server-side, gating Submit evaluation below).
+function ParameterScoring({ employeeId, editable, initialRating }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const load = () => api(`/pms/team/parameter-scores/${employeeId}`).then(setData).catch(e => setErr(e.message));
+  useEffect(() => { load(); }, [employeeId]);
+
+  const setScore = async (parameterId, value) => {
+    try {
+      const r = await api(`/pms/team/parameter-scores/${employeeId}`, { method: 'PUT', body: JSON.stringify({ scores: { [parameterId]: Number(value) } }) });
+      setData(d => d ? { ...d, scores: { ...d.scores, [parameterId]: Number(value) }, weighted_rating: r.weighted_rating, complete: r.complete, missing: r.missing } : d);
+    } catch (e) { setErr(e.message); }
+  };
+
+  if (err) return <p className="text-xs text-rose-600">{err}</p>;
+  if (!data) return <p className="text-xs text-slate-400">Loading parameters…</p>;
+
+  return (
+    <div className="space-y-2">
+      <p className="lbl mb-0">7 Organizational Parameters {!data.complete && <span className="text-amber-600 font-normal">— {data.missing.length} not yet scored</span>}</p>
+      <div className="grid sm:grid-cols-2 gap-2">
+        {data.parameters.map(p => (
+          <div key={p.id} className="flex items-center justify-between gap-2 bg-stone-50 rounded-lg px-2 py-1.5">
+            <span className="text-xs">{p.name} <span className="text-slate-400">({p.weight_pct}%)</span></span>
+            <select className="inp !py-1 w-16" value={data.scores[p.id] ?? ''} disabled={!editable} onChange={e => setScore(p.id, e.target.value)}>
+              <option value="">—</option>
+              {[1, 2, 3, 4, 5].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+      <p className="text-sm">
+        <span className="font-semibold">Weighted overall rating: </span>
+        <span className={data.complete ? 'text-emerald-700 font-bold' : 'text-slate-400'}>{data.weighted_rating ?? '—'}</span>
+        {!data.complete && <span className="text-[11px] text-slate-400"> (updates live as parameters are scored; final once all 7 are)</span>}
+      </p>
     </div>
   );
 }

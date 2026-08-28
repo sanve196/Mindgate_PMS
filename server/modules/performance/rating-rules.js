@@ -19,4 +19,30 @@ function isSuper50Eligible(recentRatingsDesc) {
   return allTopTier && mostRecentIsTopGrade;
 }
 
-module.exports = { isSuper50Eligible };
+// BR-6.2/6.3: weighted overall rating from the 7 Organizational Driver
+// parameters. `parameters` = active pms.review_parameters rows ({id,
+// weight_pct}); `scores` = Map/object of parameter_id -> score (1-5).
+// Only complete when every active parameter has a score — an incomplete
+// weighted average would silently understate the rating if a parameter
+// were simply left unscored, so callers must check `complete` before
+// treating `rating` as final. Weight validity (summing to ~100) is a
+// separate concern, checked at configuration time via phase-machine's
+// weightsValid(), not here.
+function computeWeightedRating(parameters, scores) {
+  const get = (id) => (scores instanceof Map ? scores.get(id) : scores[id]);
+  let weightedSum = 0; let weightSeen = 0; const missing = [];
+  for (const p of parameters) {
+    const s = get(p.id);
+    if (s == null || Number.isNaN(Number(s))) { missing.push(p.id); continue; }
+    weightedSum += Number(s) * (Number(p.weight_pct) / 100);
+    weightSeen += Number(p.weight_pct);
+  }
+  const complete = missing.length === 0 && parameters.length > 0;
+  // Partial rating still returned (rounded) so a "draft so far" figure can
+  // be shown live in the UI as the manager scores each parameter — but
+  // never treated as final while `complete` is false.
+  const rating = parameters.length > 0 ? Math.round(weightedSum * 10) / 10 : null;
+  return { rating, complete, missing };
+}
+
+module.exports = { isSuper50Eligible, computeWeightedRating };

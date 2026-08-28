@@ -26,6 +26,7 @@ before(async () => {
   const t = (await db.query(`INSERT INTO core.tenants (name, slug) VALUES ($1,$1) RETURNING id`, [slug])).rows[0];
   tenantId = t.id;
   await require('../migrations/002-default-permission-bundles').ensureTenantSeeds(db, t.id);
+  await require('../migrations/008-review-parameters').ensureDefaultParameters(db, t.id);
 
   const mgr = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'S50 Mgr','s50-mgr@x.com','active') RETURNING id`, [t.id])).rows[0];
   const emp = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status, manager_id) VALUES ($1,'S50 Emp','s50-emp@x.com','active',$2) RETURNING id`, [t.id, mgr.id])).rows[0];
@@ -61,6 +62,11 @@ async function api(path, token, opts = {}) {
   const r = await fetch(`${base}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) } });
   return { status: r.status, body: await r.json() };
 }
+async function scoreAllParamsTo(mgrTok, employeeId, value) {
+  const plist = await api('/pms/review-parameters', mgrTok);
+  const scores = Object.fromEntries(plist.body.parameters.map((p) => [p.id, value]));
+  return api(`/pms/team/parameter-scores/${employeeId}`, mgrTok, { method: 'PUT', body: JSON.stringify({ scores }) });
+}
 
 // Runs one full annual cycle end-to-end (draft -> publish) with the given
 // manager rating for the fixed employee, returning the /publish response.
@@ -70,7 +76,8 @@ async function runAnnualCycle(hrTok, mgrTok, rating, name) {
   for (const phase of ['kra_open', 'self_appraisal', 'manager_eval']) {
     await api(`/pms/cycles/${cycleId}/phase`, hrTok, { method: 'POST', body: JSON.stringify({ to: phase }) });
   }
-  await api(`/pms/team/evaluations/${empId}`, mgrTok, { method: 'PUT', body: JSON.stringify({ overall_rating: rating, strengths: 'x', improvement_areas: 'y' }) });
+  await scoreAllParamsTo(mgrTok, empId, rating);
+  await api(`/pms/team/evaluations/${empId}`, mgrTok, { method: 'PUT', body: JSON.stringify({ strengths: 'x', improvement_areas: 'y' }) });
   await api(`/pms/team/evaluations/${empId}/submit`, mgrTok, { method: 'POST' });
   for (const phase of ['hod_eval', 'calibration', 'publish']) {
     await api(`/pms/cycles/${cycleId}/phase`, hrTok, { method: 'POST', body: JSON.stringify({ to: phase }) });

@@ -39,3 +39,47 @@ test('non-numeric or malformed entries are treated as not eligible, not thrown',
   assert.equal(isSuper50Eligible(undefined), false);
   assert.equal(isSuper50Eligible(['x', 5, 5]), false);
 });
+
+// ---------- computeWeightedRating (BR-6.2/6.3) ------------------------------
+const { computeWeightedRating } = require('../modules/performance/rating-rules');
+
+test('weighted rating: equal weights, all scored, matches simple average', () => {
+  const params = [{ id: 'a', weight_pct: 50 }, { id: 'b', weight_pct: 50 }];
+  const r = computeWeightedRating(params, { a: 4, b: 2 });
+  assert.equal(r.complete, true);
+  assert.equal(r.rating, 3); // (4*0.5)+(2*0.5)=3
+});
+
+test('weighted rating: uneven weights computed correctly', () => {
+  const params = [{ id: 'a', weight_pct: 70 }, { id: 'b', weight_pct: 30 }];
+  const r = computeWeightedRating(params, { a: 5, b: 1 });
+  assert.equal(r.complete, true);
+  assert.equal(r.rating, 3.8); // 5*0.7 + 1*0.3 = 3.8
+});
+
+test('weighted rating: missing a score is incomplete, reports which parameter', () => {
+  const params = [{ id: 'a', weight_pct: 50 }, { id: 'b', weight_pct: 50 }];
+  const r = computeWeightedRating(params, { a: 4 });
+  assert.equal(r.complete, false);
+  assert.deepEqual(r.missing, ['b']);
+});
+
+test('weighted rating: accepts a Map as well as a plain object for scores', () => {
+  const params = [{ id: 'a', weight_pct: 100 }];
+  const r = computeWeightedRating(params, new Map([['a', 4]]));
+  assert.equal(r.complete, true);
+  assert.equal(r.rating, 4);
+});
+
+test('weighted rating: zero parameters is not complete and has no rating', () => {
+  const r = computeWeightedRating([], {});
+  assert.equal(r.complete, false);
+  assert.equal(r.rating, null);
+});
+
+test('weighted rating: rounds to one decimal place', () => {
+  const params = [{ id: 'a', weight_pct: 33.33 }, { id: 'b', weight_pct: 33.33 }, { id: 'c', weight_pct: 33.34 }];
+  const r = computeWeightedRating(params, { a: 3, b: 4, c: 5 });
+  assert.equal(r.complete, true);
+  assert.equal(r.rating, 4); // (3+4+5)/3 = 4 exactly, but via weights ~3.9999+ -> rounds to 4.0
+});

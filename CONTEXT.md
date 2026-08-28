@@ -14,6 +14,48 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **7 Organizational Parameters weighted rating engine built
+  (BR-6.2/BR-6.3)** — the biggest remaining piece from the priority order.
+  migrations/008-review-parameters.js: pms.review_parameters (configurable
+  name/weight_pct/sort_order, seeded with the 7 BRD-named drivers — My
+  Organisation Culture, My Work, My Manager, My Organisation, My Senior
+  Leadership, My Career & Learning, My Team — at BRD-default weights
+  summing to exactly 100) and pms.parameter_scores. New tenants get the
+  defaults via ensureDefaultParameters() at boot, same pattern as
+  migration 002. computeWeightedRating() in rating-rules.js is a pure,
+  unit-tested (13 tests) function — incomplete scoring (not every
+  parameter scored) is explicitly flagged, never silently averaged over a
+  gap. New routes: GET/PUT /pms/review-parameters (HR configures, reusing
+  phase-machine's weightsValid() so this is held to the exact same
+  "sums to 100" rule as KRA weights), GET/PUT /pms/team/parameter-scores/
+  :employeeId (manager scores each of the 7, sees a live-recalculating
+  weighted total per Fig. 8b — annual cycles only, 409s on midyear).
+  CRITICAL DESIGN CHOICE: the computed weighted score writes directly into
+  the EXISTING, already-tested pms.manager_evaluations.overall_rating
+  column once complete — the exact same column PIP, Super 50, 9-Box, and
+  /publish already read. Nothing downstream needed to change to consume a
+  7-parameter-derived rating instead of a manager-typed one.
+  Also added a guard: PUT /team/evaluations/:employeeId now 409s if a
+  caller tries to set overall_rating directly on an annual cycle (must go
+  through parameter-scores instead) — otherwise the whole weighting
+  requirement would just be a UI suggestion nobody has to follow. Mid-Year's
+  separate BR-5.4 self+manager rating is completely unaffected (guard is
+  annual-only).
+  THIS GUARD BROKE two previously-passing tests (pip.test.js, super50.test.js
+  — both directly PUT overall_rating on annual cycles). Fixed properly, not
+  papered over: both now use a scoreAllParamsTo() helper (scoring every
+  parameter identically makes the weighted average exactly equal that
+  value regardless of individual weights, since weights sum to 100) —
+  correctly exercises the real, intended production path instead of the
+  now-disallowed shortcut.
+  Frontend: TeamEvalPage.jsx's plain rating <select> is now conditional —
+  annual cycles get a new ParameterScoring component (grid of the 7
+  parameters, 1-5 each, live weighted total, "N not yet scored" state);
+  midyear cycles keep the original select unchanged. CycleAdminPage.jsx
+  gained a ReviewParametersConfig section for HR (add/remove/reweight
+  parameters, Save disabled until the total is exactly 100). Both verified
+  with clean production builds. 55/55 backend tests pass with DB attached
+  (40/55, 15 skipped, without).
 - 28-Aug-2026: **9-Box Grid view built (BR-6.4)**. pms.top_talent already
   captured nine_box_cell per employee (entered via the existing
   Calibration screen) but there was no aggregated VIEW of it anywhere —
