@@ -125,7 +125,55 @@ export default function App() {
   );
 }
 
+// Automatically checks whether this deployment has any account at all
+// (GET /setup/status, unauthenticated — see core/setup.js) and shows a
+// friendly first-time setup form instead of a plain login box when it
+// doesn't. Once an account exists, /setup/status permanently reports
+// false and everyone just sees the normal login form below — this is
+// not a standing "create account" screen, only a one-time first-run one.
 function Login({ onUser }) {
+  const [needsSetup, setNeedsSetup] = useState(null); // null = still checking
+  useEffect(() => { api('/setup/status').then(r => setNeedsSetup(r.bootstrap_available)).catch(() => setNeedsSetup(false)); }, []);
+  if (needsSetup === null) return null;
+  return needsSetup ? <FirstTimeSetup onUser={onUser} /> : <SignIn onUser={onUser} />;
+}
+
+function FirstTimeSetup({ onUser }) {
+  const [name, setName] = useState(''); const [email, setEmail] = useState('');
+  const [password, setPassword] = useState(''); const [confirm, setConfirm] = useState('');
+  const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setErr(null);
+    if (!name.trim() || !email.trim() || !password) { setErr('All fields are required.'); return; }
+    if (password.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+    if (password !== confirm) { setErr('Passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      await api('/setup/bootstrap-admin', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      try {
+        const r = await api('/auth/dev-login', { method: 'POST', body: JSON.stringify({ email, password }) });
+        localStorage.setItem('apms_token', r.token); onUser(r.user);
+      } catch {
+        setErr('Account created — but automatic sign-in is unavailable on this deployment yet (ask whoever manages it to set AUTH_DEV to true), then reload this page and sign in with the email/password you just chose.');
+        setBusy(false);
+      }
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return (
+    <div className="max-w-sm mx-auto mt-[10vh] flex flex-col gap-3">
+      <h1 className="text-lg font-bold flex items-center gap-2"><Sparkles size={18} className="text-amber-500" /> Agentic PMS — First-Time Setup</h1>
+      <p className="text-xs text-slate-500">No account exists yet on this deployment. Create the first admin account below — this screen only appears once.</p>
+      <input className="inp" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
+      <input className="inp" placeholder="Your email" value={email} onChange={e => setEmail(e.target.value)} />
+      <input className="inp" type="password" placeholder="Choose a password (min 8 characters)" value={password} onChange={e => setPassword(e.target.value)} />
+      <input className="inp" type="password" placeholder="Confirm password" value={confirm} onChange={e => setConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
+      {err && <p className="text-xs text-rose-600">{err}</p>}
+      <button className="btn-pri" disabled={busy} onClick={go}>{busy ? 'Creating account…' : 'Create admin account & sign in'}</button>
+    </div>
+  );
+}
+
+function SignIn({ onUser }) {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [err, setErr] = useState(null);
   const go = async () => {
     setErr(null);

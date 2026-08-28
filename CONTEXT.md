@@ -14,6 +14,32 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **First-time setup screen added to the frontend** — using
+  the backend bootstrap endpoint (below) required curl/PowerShell, which
+  was correctly called out as not remotely user-friendly for whoever
+  actually needs to stand this deployment up. App.jsx's Login component
+  now checks GET /setup/status on load; if no account exists anywhere on
+  the deployment yet, it shows a proper "First-Time Setup" form (name,
+  email, password, confirm) instead of the plain sign-in box — submitting
+  it calls bootstrap-admin then immediately auto-logs the new admin in,
+  so creating the account and being signed into the app is ONE step, no
+  terminal involved at all. Once an account exists, /setup/status
+  permanently reports false and every subsequent visitor just sees the
+  normal sign-in form — this is a one-time first-run screen, not a
+  standing public signup page. Handled one real edge case explicitly
+  rather than showing a confusing raw error: if AUTH_DEV isn't enabled
+  yet on this deployment, bootstrap still succeeds but the automatic
+  login step will fail (dev-login is gated behind AUTH_DEV=true) — the
+  form catches that specific case and tells the person exactly what to
+  do (ask whoever manages the deployment to enable AUTH_DEV, then reload
+  and sign in manually with the credentials they already chose) instead
+  of a generic "Invalid credentials" or similar.
+  Verified live end-to-end against real Postgres, reproducing exactly
+  what the new UI does: fresh tenant (0 employees) -> GET /setup/status
+  returns true -> bootstrap-admin -> immediate dev-login succeeds with
+  role=admin -> GET /setup/status now returns false. Clean frontend
+  production build. 113/113 backend tests still pass (unaffected —
+  frontend-only change).
 - 28-Aug-2026: **One-time admin bootstrap built (core/setup.js)** — a fresh
   deployment had no way to create ANY account: production has AUTH_DEV=false
   (correctly), and dev-login is the only login route in the codebase at
