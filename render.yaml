@@ -8,10 +8,23 @@ services:
     buildCommand: npm install
     startCommand: node index.js
     envVars:
+      # fromDatabase auto-links this to the agentic-pms-db resource
+      # created by the SAME blueprint — Render fills in the real
+      # connection string itself the moment the database exists. This
+      # value literally cannot be known ahead of time (Render assigns the
+      # internal hostname dynamically), so it must never be a manual
+      # "enter value" field — that was a mistake in an earlier version of
+      # this file.
       - key: DATABASE_URL
-        sync: false          # dashboard-managed; value never in repo
+        fromDatabase:
+          name: agentic-pms-db
+          property: connectionString
+      # generateValue lets Render generate and store a cryptographically
+      # random secret itself at deploy time — safer than asking a human
+      # to type one into a browser field, and one less secret anyone
+      # needs to remember or lose.
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: TENANT_SLUG
         value: CHANGE_ME
       - key: AUTH_DEV
