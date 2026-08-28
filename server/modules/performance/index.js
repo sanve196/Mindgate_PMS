@@ -904,6 +904,79 @@ router.post('/publish', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- Annual Review consolidation — BR-6.1 ---------------------
+// "The system must support an end-of-year review workflow that
+// consolidates KRA outcomes, development plan progress, and career path
+// status." Everything this pulls together already exists as its own
+// feature (KRAs, self-appraisal, manager eval, 7-parameter scoring,
+// development plan, career path, rating history) — this is deliberately
+// a read-only aggregation over those, not a new source of truth. Shared
+// by both the self view and the manager/HR view below.
+async function buildAnnualReviewSummary(tenantId, employeeId, cycleId) {
+  const kraSheet = (await db.query(`SELECT * FROM pms.kra_sheets WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  const kras = kraSheet ? (await db.query(`SELECT id, title, description, weight, measures FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [kraSheet.id])).rows : [];
+  const selfAppraisal = (await db.query(`SELECT status, entries, went_well, could_improve FROM pms.self_appraisals WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  const managerEval = (await db.query(`SELECT status, entries, overall_rating, strengths, improvement_areas FROM pms.manager_evaluations WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  // KRA "outcomes" = each KRA's definition joined with its self-rating and
+  // manager-rating, keyed by kra_id in the two entries jsonb blobs above.
+  const kraOutcomes = kras.map((k) => ({
+    ...k,
+    self: selfAppraisal?.entries?.[k.id] || null,
+    manager: managerEval?.entries?.[k.id] || null,
+  }));
+
+  const devPlan = (await db.query(`SELECT id, status, manager_comment FROM pms.development_plans WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  const devGoals = devPlan ? (await db.query(`SELECT title, description, target_date, progress_pct FROM pms.development_goals WHERE plan_id=$1 ORDER BY sort_order`, [devPlan.id])).rows : [];
+  const devAvgProgress = devGoals.length ? Math.round(devGoals.reduce((s, g) => s + g.progress_pct, 0) / devGoals.length) : null;
+
+  const careerPath = (await db.query(`SELECT target_role, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [tenantId, employeeId])).rows[0];
+
+  const params = (await db.query(`SELECT id, name, weight_pct FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [tenantId])).rows;
+  const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows;
+  const scoreMap = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
+  const weighted = computeWeightedRating(params, scoreMap);
+
+  const history = (await db.query(
+    `SELECT h.cycle_id, c.name AS cycle_name, c.fiscal_year, h.final_rating, h.rating_label, h.published_at
+       FROM pms.employee_performance_history h JOIN pms.cycles c ON c.id=h.cycle_id
+      WHERE h.tenant_id=$1 AND h.employee_id=$2 ORDER BY h.published_at DESC LIMIT 5`, [tenantId, employeeId])).rows;
+
+  const superFlag = (await db.query(`SELECT super50_flag, super50_since FROM core.employees WHERE id=$1`, [employeeId])).rows[0];
+
+  return {
+    kra: { sheet: kraSheet || null, outcomes: kraOutcomes },
+    development_plan: { plan: devPlan || null, goals: devGoals, avg_progress: devAvgProgress },
+    career_path: careerPath || null,
+    parameter_scores: { parameters: params, scores: scoreMap, weighted_rating: weighted.rating, complete: weighted.complete },
+    manager_evaluation: managerEval || null,
+    rating_history: history,
+    super50: superFlag ? { flag: superFlag.super50_flag, since: superFlag.super50_since } : null,
+  };
+}
+
+router.get('/my/annual-review', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req), 'annual');
+    if (!c) return res.json({ cycle: null });
+    const summary = await buildAnnualReviewSummary(T(req), req.user.id, c.id);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, ...summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/team/annual-review/:employeeId', async (req, res) => {
+  try {
+    const emp = (await db.query(`SELECT id, name, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'pms_hod'))) {
+      return res.status(403).json({ error: 'Not your report' });
+    }
+    const c = await activeCycle(T(req), 'annual');
+    if (!c) return res.json({ cycle: null, employee: { id: emp.id, name: emp.name } });
+    const summary = await buildAnnualReviewSummary(T(req), emp.id, c.id);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, employee: { id: emp.id, name: emp.name }, ...summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- My rating & history / Connects / PIP ----------------------
 router.get('/my/rating', async (req, res) => {
   try {

@@ -14,6 +14,31 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Annual Review consolidation screen built (BR-6.1)** — "the
+  system must support an end-of-year review workflow that consolidates
+  KRA outcomes, development plan progress, and career path status." This
+  was the one clearly-defined remaining piece from the original priority
+  list once Development Plan, Career Path, and the 7-parameter engine
+  existed to consolidate. Deliberately a READ-ONLY aggregation over
+  already-existing sources of truth, not a new one: buildAnnualReviewSummary()
+  in modules/performance/index.js pulls KRA definitions joined with their
+  self_appraisals/manager_evaluations entries (keyed by kra_id in those
+  tables' jsonb blobs) as "KRA outcomes", development plan goals +
+  average progress, career path, the 7-parameter scores + live weighted
+  rating, rating history, and the Super 50 flag — all into one call.
+  New GET /pms/my/annual-review (self) and GET /pms/team/annual-review/
+  :employeeId (manager/HOD/HR, with the same "not your report" 403 guard
+  used everywhere else). Frontend: new AnnualReviewPage.jsx (nav: My
+  Performance > Annual Review) — sectioned view (KRA outcomes,
+  development plan with progress bars, career path, 7-parameter grid with
+  live weighted total, rating history), Super 50 badge when flagged.
+  Verified with a clean production build AND a live shape-check against
+  real Postgres. test/annual-review.test.js: 3 integration tests
+  (consolidation pulls real data correctly from all 4 sources in one
+  call; manager can view a report's summary, unrelated employee correctly
+  403s; a brand-new employee with zero cycle activity gets empty-but-valid
+  sections rather than an error). All 3 passed on the first run. 69/69
+  tests pass with DB attached (40/69, 29 skipped, without).
 - 28-Aug-2026: **Org-wide KRA overview + enter-on-behalf built (BR-1.1/1.4)**
   — found to be another gap in the same vein as Development Plan/Career
   Path: /team/kra-sheets was manager-scoped only (WHERE manager_id=

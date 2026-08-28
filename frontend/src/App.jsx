@@ -18,6 +18,7 @@ import NotificationBell from './pages/NotificationBell';
 import NineBoxPage from './pages/NineBoxPage';
 import MyGrowthPage from './pages/MyGrowthPage';
 import KraOrgOverviewPage from './pages/KraOrgOverviewPage';
+import AnnualReviewPage from './pages/AnnualReviewPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -25,6 +26,7 @@ const NAV = [
     { to: '/my/self-appraisal', label: 'Self-Appraisal', icon: ClipboardList },
     { to: '/my/rating', label: 'My Rating', icon: Star },
     { to: '/my/growth', label: 'My Growth', icon: TrendingUp },
+    { to: '/my/annual-review', label: 'Annual Review', icon: Award },
   ]},
   { group: 'Team', items: [
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
@@ -91,6 +93,7 @@ export default function App() {
             <Route path="/my/self-appraisal" element={<SelfAppraisalPage />} />
             <Route path="/my/rating" element={<MyRatingPage />} />
             <Route path="/my/growth" element={<MyGrowthPage />} />
+            <Route path="/my/annual-review" element={<AnnualReviewPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
             <Route path="/hod" element={<HodQueuePage />} />
             <Route path="/pip" element={<PIPPage />} />
