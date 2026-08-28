@@ -14,6 +14,31 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Quarterly Connect reminders built (BR-4.4)**. No separate
+  worker/cron service exists in this deploy (deploy/render.yaml only
+  defines api + frontend web services), so this runs in-process: an
+  interval in index.js checks once at boot and then daily, plus a manual
+  HR-triggered POST /pms/connects/check-reminders as a backup/testing
+  path. modules/performance/connect-reminders.js: pure isConnectDue()
+  (default 90-day cadence; never-held is always due) and
+  shouldRemindAgain() (default 7-day cooldown so the same person isn't
+  reminded every single day) — 8 unit tests, no DB. Orchestration
+  (checkAndSendConnectReminders, in modules/performance/index.js) finds
+  every active employee with a manager, checks their most recent connect
+  against the cadence and their most recent reminder against the
+  cooldown, and notifies BOTH the employee and their manager when due.
+  migrations/010-connect-reminders.js: pms.connect_reminders_log is the
+  cooldown record (auditable history, not a stateful flag). Verified the
+  server actually boots cleanly with the new interval and that the
+  boot-time check correctly fired against this session's real,
+  persistent test tenant (an employee overdue since earlier testing
+  triggered a real reminder on boot). test/connect-reminders-integration.test.js:
+  3 integration tests (only overdue/never-held employees are reminded,
+  not a recently-connected one; running the check again immediately
+  doesn't double-remind; the manager is notified too, not just the
+  employee). Caught the same role-seeding + missing-credentials mistake
+  as earlier sessions in my own test before trusting the first run.
+  80/80 tests pass with DB attached (48/80, 32 skipped, without).
 - 28-Aug-2026: **Annual Review consolidation screen built (BR-6.1)** — "the
   system must support an end-of-year review workflow that consolidates
   KRA outcomes, development plan progress, and career path status." This

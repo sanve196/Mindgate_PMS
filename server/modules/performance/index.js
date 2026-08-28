@@ -16,6 +16,7 @@ const { apiPermissionParity, hasPermission } = require('../../core/permissions')
 const { notify } = require('../../core/notifications');
 const { requireConsent } = require('../../core/consent');
 const { isSuper50Eligible, computeWeightedRating } = require('./rating-rules');
+const { isConnectDue, shouldRemindAgain } = require('./connect-reminders');
 const pm = require('./phase-machine');
 
 const router = express.Router();
@@ -1022,6 +1023,45 @@ router.get('/connects', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- Quarterly Connect reminders — BR-4.4 ---------------------
+// No separate worker/cron service exists in this deploy (see
+// migrations/010-connect-reminders.js), so this is triggered two ways:
+// an in-process daily interval (index.js) and this on-demand HR route
+// (also useful for testing and as a manual fallback).
+async function checkAndSendConnectReminders(tenantId) {
+  const employees = (await db.query(
+    `SELECT e.id, e.name, e.manager_id FROM core.employees e
+      WHERE e.tenant_id=$1 AND e.status='active' AND e.manager_id IS NOT NULL`, [tenantId])).rows;
+  let reminded = 0;
+  const today = new Date();
+  for (const emp of employees) {
+    const last = (await db.query(
+      `SELECT MAX(held_at) AS last_held FROM pms.connects WHERE tenant_id=$1 AND employee_id=$2`, [tenantId, emp.id])).rows[0];
+    const lastConnect = last.last_held ? new Date(last.last_held) : null;
+    if (!isConnectDue(lastConnect, today)) continue;
+    const lastReminder = (await db.query(
+      `SELECT MAX(sent_at) AS last_sent FROM pms.connect_reminders_log WHERE tenant_id=$1 AND employee_id=$2`, [tenantId, emp.id])).rows[0];
+    const lastSent = lastReminder.last_sent ? new Date(lastReminder.last_sent) : null;
+    if (!shouldRemindAgain(lastSent, today)) continue;
+    await notify(tenantId, emp.manager_id, 'connect_due', `A quarterly connect with ${emp.name} is due`, null, '/pms');
+    await notify(tenantId, emp.id, 'connect_due', 'Your quarterly connect with your manager is due', null, '/pms');
+    await db.query(
+      `INSERT INTO pms.connect_reminders_log (tenant_id, employee_id, manager_id) VALUES ($1,$2,$3)`,
+      [tenantId, emp.id, emp.manager_id]);
+    reminded++;
+  }
+  return reminded;
+}
+
+router.post('/connects/check-reminders', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const reminded = await checkAndSendConnectReminders(T(req));
+    audit(req, 'CONNECT_REMINDERS_CHECKED', null, null, { reminded });
+    res.json({ ok: true, reminded });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- PIP (Performance Improvement Plan) — BR-7.1/BR-7.2 -------
 // Auto-opened at /publish (above) when final_rating < cycle.pip_threshold.
 // Writers are the employee's manager or HR (BRD Owner/Approver column);
@@ -1125,4 +1165,4 @@ router.get('/watchlist', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-module.exports = { router };
+module.exports = { router, checkAndSendConnectReminders };

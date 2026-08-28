@@ -54,6 +54,21 @@ async function main() {
 
   const port = process.env.PORT || 8080;
   app.listen(port, () => logger.info('agentic-pms up', { port, tenant: slug }));
+
+  // BR-4.4: Quarterly Connect reminders. No separate worker/cron service
+  // in this deploy (deploy/render.yaml defines only api + frontend), so
+  // this runs in-process. Checked once at boot (catches anything overdue
+  // since the last restart) and then daily. checkAndSendConnectReminders
+  // itself is idempotent per employee (cooldown-gated via
+  // pms.connect_reminders_log), so overlapping/frequent calls are safe —
+  // this interval is deliberately conservative rather than clever.
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const { checkAndSendConnectReminders } = require('./modules/performance');
+  const runReminderCheck = () => checkAndSendConnectReminders(TENANT_ID)
+    .then((n) => n && logger.info('connect reminders sent', { count: n }))
+    .catch((e) => logger.warn('connect reminder check failed', { error: e.message }));
+  runReminderCheck();
+  setInterval(runReminderCheck, ONE_DAY_MS);
 }
 
 main().catch(e => { logger.error('boot failed', { error: e.message }); process.exit(1); });
