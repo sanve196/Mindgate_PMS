@@ -14,6 +14,28 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Fixed a real layout bug flagged from a live screenshot**:
+  every page's content wrapper (`className="space-y-4 max-w-Nxl"`) had a
+  max-width but no `mx-auto`, so on any screen wider than that max-width
+  the whole page hugged the left edge with a large dead void on the right
+  — looked broken/unfinished, not a matter of taste. Confirmed systemic
+  (20 of the app's ~25 pages had this exact pattern) via a proper regex
+  search rather than the narrower grep used the first time (which missed
+  it because max-w-4xl sat at the END of the className string, not
+  followed by a space — a real miss worth noting for next time). Fixed
+  with a Python regex sweep across all 20 files in one pass, adding
+  mx-auto to the two exact patterns found ("space-y-4 max-w-X" and
+  "max-w-X space-y-4"), while correctly leaving KraOrgOverviewPage.jsx's
+  `inp max-w-xs` search box untouched — that's a small left-aligned input
+  within a row, not a page wrapper, and centering it would have been
+  wrong. Verified live at a 1920px viewport (wider than the screenshot
+  that surfaced the bug) with real screenshots before and after: content
+  now sits properly centered in the available space on every page
+  checked, including one (My Growth) that naturally doesn't fill an
+  ultra-wide viewport by design — confirmed that reads as intentional
+  spacing now, not a layout bug, once the centering itself was fixed.
+  113/113 backend tests pass (unaffected, frontend-only); clean
+  production build.
 - 28-Aug-2026: **Full visual redesign to match the BRD's reference
   screenshots + "liquid glass, smooth and bright fonts, minimalism,
   uniform/homogeneous" directive.** Extracted the 7 screenshots actually

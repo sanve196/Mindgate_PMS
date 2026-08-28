@@ -46,7 +46,7 @@ export default function EngagementPage() {
   };
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-4xl mx-auto">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Engagement</h2>
         {data.admin && <button className="btn-pri" onClick={createSurvey}><Plus size={13} className="inline mr-1" />New survey</button>}
@@ -125,7 +125,7 @@ function TakeSurvey({ survey, done }) {
     catch (e) { setErr(e.message); }
   };
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-2xl mx-auto space-y-4">
       <h2 className="text-lg font-bold">{survey.title}</h2>
       {survey.anonymity_default && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2">This survey is anonymous. Your name is never stored with your answers{survey.allow_attribution_optin ? ' unless you opt in below' : ''}.</p>}
       {qs.map(q => (

@@ -11,7 +11,7 @@ const STATUS_COLOR = {
 
 export default function MyGrowthPage() {
   return (
-    <div className="space-y-4 max-w-6xl">
+    <div className="space-y-4 max-w-6xl mx-auto">
       <h2 className="text-lg font-bold">My Growth</h2>
       <div className="grid lg:grid-cols-2 gap-4">
         <DevelopmentPlanCard />

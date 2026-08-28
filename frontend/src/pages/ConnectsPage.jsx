@@ -13,7 +13,7 @@ export default function ConnectsPage() {
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-bold">Quarterly Connects</h2>
         <button className="btn-pri" onClick={() => setShowNew(v => !v)}><Plus size={13} className="inline mr-1" />Log a connect</button>

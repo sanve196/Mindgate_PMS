@@ -13,7 +13,7 @@ export default function ClosureLettersPage() {
   if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-4xl mx-auto">
       <div>
         <h2 className="text-lg font-bold">Closure Letters</h2>
         <p className="text-xs text-navy-400">{data.cycle.name} — draft with AI, review, then generate the branded PDF. Nothing is ever sent without your review.</p>

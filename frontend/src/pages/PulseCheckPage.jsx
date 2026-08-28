@@ -22,7 +22,7 @@ export default function PulseCheckPage() {
   if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active mid-year cycle.</div>;
 
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4 max-w-2xl mx-auto">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-bold">7-Parameter Pulse Check</h2>
         <span className="chip bg-cyan-100 text-cyan-700">{data.cycle.name}</span>

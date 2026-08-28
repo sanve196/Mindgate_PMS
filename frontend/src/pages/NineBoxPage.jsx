@@ -20,7 +20,7 @@ export default function NineBoxPage() {
   }, [level]);
 
   return (
-    <div className="space-y-4 max-w-5xl">
+    <div className="space-y-4 max-w-5xl mx-auto">
       <div>
         <h2 className="text-lg font-bold">9-Box Grid</h2>
         <p className="text-xs text-navy-400">Performance vs potential, from the "9-box" values entered on the Calibration screen. Visible to HR and Delivery Head.</p>

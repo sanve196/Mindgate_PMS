@@ -13,7 +13,7 @@ export default function MidYearReviewPage() {
   if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active mid-year cycle.</div>;
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-bold">Mid-Year Review</h2>
         <span className="chip bg-cyan-100 text-cyan-700">{data.cycle.name}</span>

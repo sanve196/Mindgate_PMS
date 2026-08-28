@@ -20,7 +20,7 @@ export default function PIPPage() {
   if (!pips) return <p className="text-sm text-navy-400">Loading…</p>;
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-4xl mx-auto">
       <div>
         <h2 className="text-lg font-bold">Performance Improvement Plans</h2>
         <p className="text-xs text-navy-400">Auto-opened when a published rating falls below the cycle's threshold. Weekly notes are added by the manager or HR; the employee has read-only visibility.</p>

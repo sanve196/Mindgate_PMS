@@ -12,7 +12,7 @@ export default function AnnualReviewPage() {
   if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active annual cycle.</div>;
 
   return (
-    <div className="space-y-4 max-w-5xl">
+    <div className="space-y-4 max-w-5xl mx-auto">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Annual Review</h2>
         <span className="chip bg-purple-100 text-purple-700">{data.cycle.name}</span>

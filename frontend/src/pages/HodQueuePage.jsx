@@ -10,7 +10,7 @@ export default function HodQueuePage() {
   if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
   const editable = data.cycle.phase === 'hod_eval';
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-4xl mx-auto">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Delivery Head Review</h2>
         <span className={`chip ${phaseColor(data.cycle.phase)}`}>{data.cycle.name} · {phaseLabel(data.cycle.phase)}</span>

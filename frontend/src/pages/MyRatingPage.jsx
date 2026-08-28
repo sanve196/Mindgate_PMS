@@ -9,7 +9,7 @@ export default function MyRatingPage() {
   if (!rows) return <p className="text-sm text-navy-400">Loading…</p>;
   const token = localStorage.getItem('apms_token');
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-2xl mx-auto space-y-4">
       <h2 className="text-lg font-bold">My Rating History</h2>
       {!rows.length ? <div className="card p-8 text-center text-sm text-navy-400">No published ratings yet. Ratings appear here after HR publishes a cycle.</div> : (
         <div className="card divide-y divide-navy-100">

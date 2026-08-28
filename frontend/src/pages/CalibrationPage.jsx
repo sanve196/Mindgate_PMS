@@ -28,7 +28,7 @@ export default function CalibrationPage() {
   const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
 
   return (
-    <div className="space-y-4 max-w-5xl">
+    <div className="space-y-4 max-w-5xl mx-auto">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Calibration</h2>
         <span className="chip bg-purple-100 text-purple-700">{data.cycle.name}</span>

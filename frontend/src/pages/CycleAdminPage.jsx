@@ -44,7 +44,7 @@ export default function CycleAdminPage() {
   if (!cycles) return <p className="text-sm text-navy-400">Loading…</p>;
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-4xl mx-auto">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Appraisal Cycles</h2>
         <button className="btn-pri" onClick={create}><Plus size={13} className="inline mr-1" />New cycle</button>
