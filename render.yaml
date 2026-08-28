@@ -59,8 +59,21 @@ services:
         generateValue: true
       - key: TENANT_SLUG
         value: CHANGE_ME
+      # TESTING PHASE ONLY: "true" for now, since no real SSO exists yet
+      # (see core/auth.js's own comments — production auth is meant to be
+      # the client's IdP via OIDC, never actually built). Found the hard
+      # way that a fixed `value:` here, whatever it's set to, gets
+      # RE-APPLIED and silently overwrites any manual toggle made in the
+      # Render dashboard on every Blueprint sync — a person had correctly
+      # switched this to "true" by hand, then a later sync (needed for an
+      # unrelated fix) quietly reverted it back to "false" and broke
+      # login again with no visible warning that it had happened. Keeping
+      # the desired value HERE, in version control, is what actually
+      # holds across syncs — a dashboard-only toggle does not.
+      # MUST be set back to "false" before any real production handoff —
+      # dev-login is a break-glass mechanism, not real authentication.
       - key: AUTH_DEV
-        value: "false"       # "true" only on dev instances
+        value: "true"
   - type: web
     name: agentic-pms-frontend
     env: static
