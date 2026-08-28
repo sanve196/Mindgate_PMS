@@ -17,6 +17,7 @@ async function main() {
   const missing = REQUIRED_ENV.filter(k => !process.env[k]);
   if (missing.length) { logger.error('Missing required env', { missing }); process.exit(1); }
 
+  await db.waitForDatabase(); // tolerates the DB still provisioning on a fresh Blueprint sync — see core/db.js
   await runMigrations(); // throws → process exits nonzero → deploy fails loudly
 
   // Single-tenant instance: resolve (or create) the tenant for this deployment.

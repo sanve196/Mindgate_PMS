@@ -14,6 +14,51 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **First real Render deploy attempt surfaced two genuine
+  infra issues, both fixed** (this is the first time this app has
+  actually been deployed to Render, not just tested locally):
+  1. Blueprint sync failed: "cannot have more than one active free tier
+     database" — Render allows only one free Postgres per workspace, and
+     the deploying workspace already had one elsewhere. Fixed in
+     render.yaml: database moved to basic-256mb (Render's own documented
+     cheapest PAID Postgres tier, ~$6-7/month, confirmed against Render's
+     Blueprint YAML reference and example repos) — api + frontend stay on
+     the free plan, so total cost is ~$6-7/month, the lowest possible
+     given the one-free-database-per-workspace constraint. (Earlier in
+     this same session, api+db+frontend were all attempted on plan: free
+     and separately, before that, on paid defaults totalling ~$17.50/mo —
+     both superseded by this.)
+  2. First boot after that fix crashed: "connect ECONNREFUSED" to the
+     database's internal IP, then auto-restarted and crashed again. Root
+     cause: a Postgres database freshly created in the SAME Blueprint sync
+     as the api service is not immediately reachable — the web service
+     started trying to connect before the database finished its own
+     initial provisioning (a real, observed race, not a theoretical one).
+     Fixed: core/db.js gained retryUntilReachable() (pure retry/backoff
+     logic, dependency-injected connectivity check) and waitForDatabase()
+     (the real-pool wrapper), called from index.js's main() BEFORE
+     runMigrations() — up to 15 attempts, 4s apart (60s total grace).
+     Still fails loudly after exhausting retries, preserving the existing
+     "a broken deploy is not a degraded state" philosophy — this only
+     tolerates the specific narrow "not up yet" startup race, nothing
+     else. test/wait-for-database.test.js: 5 unit tests against the REAL
+     exported retryUntilReachable() (via a fake connectivity-check
+     callback, not a hand-duplicated copy of the logic) — succeeds
+     immediately when reachable, retries through transient failures then
+     succeeds, still throws after exhausting retries, respects
+     maxAttempts exactly, only logs "reachable" when a retry was actually
+     needed. Runs with NO database and NO env vars configured (pg's Pool
+     is lazy — doesn't connect at construction, only on first query — so
+     requiring core/db.js with DATABASE_URL unset is safe as long as
+     nothing calls the real pool). Also live-verified full boot still
+     works normally end-to-end when the DB IS already reachable (no
+     regression, no added log noise on the happy path).
+  108/108 tests pass with DB attached (53/108, 55 skipped, without —
+  note the 5 new tests here run unconditionally in BOTH environments,
+  unlike this project's other integration suites, since they need no DB).
+  Pushed to both remotes (nileshsatpute82/Agentic-PMS and
+  sanve196/Mindgate_PMS — the latter is the one actually connected to
+  Render for this deployment).
 - 28-Aug-2026: **Found and fixed a real deploy-breaking gap before it hit
   production**: the frontend called relative /api/v1 paths everywhere
   (utils/api.jsx's api() helper, plus 4 hardcoded <a href> download links
