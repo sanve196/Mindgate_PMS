@@ -80,6 +80,23 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    # This app is a React single-page app (client-side routing via
+    # react-router). Without this rewrite, a hard refresh or a directly-
+    # opened/shared URL like /admin/cycles fails with "Not Found" — the
+    # browser asks Render's static file server for that exact path, but
+    # the only real file that exists is index.html; react-router only
+    # understands /admin/cycles AFTER that file's JavaScript has loaded
+    # and taken over. Clicking a link inside the app works fine (no real
+    # HTTP request happens, react-router intercepts it client-side) —
+    # only a fresh page load hits this, which is exactly why it looked
+    # fine while testing by clicking around, then broke the moment a URL
+    # was shared or refreshed. This rewrite sends every path Render
+    # doesn't recognise as a real file back to index.html instead of
+    # 404ing, so react-router gets a chance to load first and take over.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       # BUG FOUND VIA A LIVE DEPLOY, FIXED HERE: fromService's `property:
       # host` returns the PRIVATE-NETWORK-ONLY hostname (confirmed against

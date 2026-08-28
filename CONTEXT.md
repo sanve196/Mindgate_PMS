@@ -14,6 +14,34 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Fixed "Not Found" on refresh/direct URL load in
+  production** — flagged from a live deploy (refreshing e.g. /admin/cycles
+  gave "Not Found"). Root cause: React Router's client-side routing only
+  understands paths like /admin/cycles AFTER index.html's JavaScript has
+  loaded and taken over — clicking a link inside the app works because no
+  real HTTP request happens (react-router intercepts it), but a hard
+  refresh or a directly-opened/shared URL makes the BROWSER ask Render's
+  static file server for that exact path as a real file, which doesn't
+  exist (the only real file is index.html). This is exactly why it looked
+  fine while clicking around during earlier testing and only broke once a
+  URL was shared or refreshed directly — the failure mode was inherently
+  invisible to normal click-through testing.
+  Fixed with the standard, Render-documented mechanism for single-page
+  apps: added a `routes: [{ type: rewrite, source: /*, destination:
+  /index.html }]` block to render.yaml's frontend service. Real static
+  files (JS/CSS/fonts/etc.) still resolve normally and take priority —
+  the rewrite only catches paths that don't match a real file, handing
+  them to index.html so react-router gets a chance to load and take over
+  client-side, exactly the same mechanism as Netlify's _redirects or
+  Vercel's rewrites for the same class of problem. Does not affect API
+  calls at all — those go straight to the separate api service via the
+  absolute VITE_API_URL already baked into the JS bundle at build time,
+  never through this static site's routing.
+  Validated the YAML syntax; could not test the actual rewrite behaviour
+  against live Render infrastructure from this sandbox (no route to
+  onrender.com), so this needs a real-world confirmation after the next
+  deploy — noted honestly rather than claimed as fully verified.
+  113/113 backend tests pass (unaffected, config-only change).
 - 28-Aug-2026: **Fixed a real layout bug flagged from a live screenshot**:
   every page's content wrapper (`className="space-y-4 max-w-Nxl"`) had a
   max-width but no `mx-auto`, so on any screen wider than that max-width
