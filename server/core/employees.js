@@ -1,4 +1,4 @@
-// Employee mirror + CSV import — People Core.
+// Employee mirror + bulk import (CSV and Excel) — People Core.
 //
 // The employee master is IMPORTED from the client's HRMS, never maintained
 // here. Correctness of the manager chain and departments is a stated
@@ -6,15 +6,21 @@
 // the importer VALIDATES and reports per-row reasons — the no-silent-failure
 // rule. Nothing loads unless the file is coherent; dry-run is the default.
 //
-// CSV columns (header row, case-insensitive, order-free):
+// Accepted formats: .csv, .xlsx, .xls (BR-1.1 — "a bulk Excel upload option
+// must be made available"). Both formats resolve to the same row shape and
+// share one validator, so behaviour (required columns, manager-chain checks,
+// date parsing, dry-run default) is identical regardless of file type.
+//
+// Columns (header row, case-insensitive, order-free):
 //   emp_code, name, email, department, designation, role_band,
 //   manager_email, date_of_joining (flexible formats), status
 //
-// validateEmployeeCsv() is a PURE function — no db — so it is unit-tested
+// validateEmployeeRows() is a PURE function — no db — so it is unit-tested
 // directly and reused by the standalone tool in /tools.
 
 const express = require('express');
 const multer = require('multer');
+const ExcelJS = require('exceljs');
 const db = require('./db');
 const logger = require('./logger');
 const { authenticate } = require('./auth');
@@ -66,8 +72,37 @@ function flexDate(v) {
 const REQUIRED = ['name', 'email'];
 const KNOWN = ['emp_code','name','email','department','designation','role_band','manager_email','date_of_joining','status'];
 
-function validateEmployeeCsv(text) {
-  const rows = parseCsv(text);
+// ---------- Excel (.xlsx/.xls) parsing — same array-of-rows shape as parseCsv
+// so both formats feed the one validator below. Dates come back as either a
+// real Date (Excel serial dates) or text; both are normalised to strings
+// here so flexDate() in the shared validator handles them identically to a
+// CSV cell, with no format-specific branching downstream.
+async function parseExcelBuffer(buffer) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+  const rows = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const cells = [];
+    // row.cellCount reflects the last populated column; iterate by number so
+    // gaps (skipped cells) still line up with the header's column positions.
+    for (let c = 1; c <= row.cellCount; c++) {
+      const cell = row.getCell(c);
+      let v = cell.value;
+      if (v == null) v = '';
+      else if (v instanceof Date) v = v.toISOString().slice(0, 10); // -> yyyy-mm-dd, flexDate handles it
+      else if (typeof v === 'object' && 'text' in v) v = v.text; // rich text
+      else if (typeof v === 'object' && 'result' in v) v = v.result; // formula cell
+      else v = String(v);
+      cells.push(v);
+    }
+    if (cells.some((c) => String(c).trim() !== '')) rows.push(cells);
+  });
+  return rows;
+}
+
+function validateEmployeeRows(rows) {
   if (!rows.length) return { ok: false, fatal: 'Empty file', rows: [], errors: [], warnings: [] };
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
   const missing = REQUIRED.filter(c => !header.includes(c));
@@ -138,6 +173,40 @@ function validateEmployeeCsv(text) {
     summary: { total: out.length, errors: errors.length, warnings: warnings.length, departments: new Set(out.map(r => r.department).filter(Boolean)).size } };
 }
 
+// Format-specific entry points — both funnel into validateEmployeeRows so
+// CSV and Excel get identical validation, identical error messages, and
+// identical dry-run behaviour. Existing callers/tests keep using
+// validateEmployeeCsv(text) unchanged.
+function validateEmployeeCsv(text) {
+  return validateEmployeeRows(parseCsv(text));
+}
+async function validateEmployeeXlsx(buffer) {
+  let rows;
+  try { rows = await parseExcelBuffer(buffer); }
+  catch (e) { return { ok: false, fatal: `Could not read Excel file: ${e.message}`, rows: [], errors: [], warnings: [] }; }
+  return validateEmployeeRows(rows);
+}
+
+// Sniff format from filename/mimetype rather than trusting one signal alone
+// (some browsers send a generic octet-stream mimetype for .xlsx).
+//
+// NOTE on legacy .xls: that extension is the old pre-2007 binary format, not
+// a variant of .xlsx — it needs a different parser entirely. The only
+// actively-maintained npm option for it (`xlsx`/SheetJS) currently ships two
+// unpatched high-severity advisories (prototype pollution, ReDoS) with no
+// fix available, so it is deliberately not used here (see package.json —
+// exceljs only). A real, uploaded .xls is therefore detected and rejected
+// with a clear message rather than mis-parsed or silently mishandled.
+function detectFormat(file) {
+  const name = (file.originalname || '').toLowerCase();
+  if (name.endsWith('.csv')) return 'csv';
+  if (name.endsWith('.xlsx')) return 'xlsx';
+  if (name.endsWith('.xls')) return 'xls-legacy';
+  if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'xlsx';
+  if (file.mimetype === 'application/vnd.ms-excel') return 'xls-legacy';
+  return 'csv'; // default: treat unrecognised uploads as CSV text, as before
+}
+
 // ---------- Load (transactional, two-pass for manager links) ---------------
 async function loadEmployees(tenantId, rows) {
   const client = await db.getClient();
@@ -175,7 +244,15 @@ async function loadEmployees(tenantId, rows) {
 }
 
 // ---------- Router ----------------------------------------------------------
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_EXT = /\.(csv|xlsx|xls)$/i;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_EXT.test(file.originalname || '')) return cb(new Error('Only .csv, .xlsx, or .xls files are accepted'));
+    cb(null, true);
+  },
+});
 const router = express.Router();
 router.use(authenticate, apiPermissionParity);
 
@@ -190,12 +267,22 @@ router.get('/', async (req, res) => {
   } catch (e) { logger.error('employees list', { error: e.message }); res.status(500).json({ error: e.message }); }
 });
 
-// POST /employees/import  (multipart file) ?commit=1 to load; default DRY RUN.
-router.post('/import', upload.single('file'), async (req, res) => {
+// POST /employees/import  (multipart file, .csv/.xlsx/.xls) ?commit=1 to load; default DRY RUN.
+router.post('/import', (req, res, next) => upload.single('file')(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.message });
+  next();
+}), async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
     if (!req.file) return res.status(400).json({ error: 'file required (multipart field "file")' });
-    const report = validateEmployeeCsv(req.file.buffer.toString('utf8'));
+
+    const format = detectFormat(req.file);
+    if (format === 'xls-legacy') {
+      return res.status(400).json({ error: 'Legacy .xls files are not supported — please re-save the file as .xlsx (File > Save As > Excel Workbook) and upload again.' });
+    }
+    const report = format === 'xlsx'
+      ? await validateEmployeeXlsx(req.file.buffer)
+      : validateEmployeeCsv(req.file.buffer.toString('utf8'));
     if (report.fatal) return res.status(400).json({ error: report.fatal });
     const commit = req.query.commit === '1';
     if (!report.ok) return res.status(422).json({ ok: false, committed: false, ...report });
@@ -208,4 +295,4 @@ router.post('/import', upload.single('file'), async (req, res) => {
   } catch (e) { logger.error('employee import', { error: e.message }); res.status(500).json({ error: e.message }); }
 });
 
-module.exports = { router, validateEmployeeCsv, flexDate, parseCsv };
+module.exports = { router, validateEmployeeCsv, validateEmployeeXlsx, validateEmployeeRows, flexDate, parseCsv, detectFormat };

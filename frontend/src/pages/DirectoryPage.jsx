@@ -20,12 +20,13 @@ export default function DirectoryPage() {
     <div className="space-y-4 max-w-4xl">
       <h2 className="text-lg font-bold">Employees</h2>
       <div className="card p-4 space-y-2">
-        <p className="lbl">CSV import — synced from your HRMS, dry run first</p>
+        <p className="lbl">Bulk import — CSV or Excel (.xlsx), synced from your HRMS, dry run first</p>
         <div className="flex flex-wrap items-center gap-2">
-          <input type="file" accept=".csv" onChange={e => { setFile(e.target.files[0]); setReport(null); }} className="text-xs" />
+          <input type="file" accept=".csv,.xlsx,.xls" onChange={e => { setFile(e.target.files[0]); setReport(null); }} className="text-xs" />
           <button className="btn-sec" disabled={!file} onClick={() => send(false)}>Validate</button>
           <button className="btn-pri" disabled={!file || !(report && report.ok && !report.committed)} onClick={() => send(true)}>Commit load</button>
         </div>
+        <p className="text-[11px] text-slate-400">Legacy .xls files aren't supported — save as .xlsx first (File → Save As → Excel Workbook).</p>
         {err && <p className="text-xs text-rose-600">{err}</p>}
         {report && (
           <div className="text-xs space-y-1">
