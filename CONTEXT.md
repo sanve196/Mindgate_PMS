@@ -14,6 +14,19 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **9-Box Grid view built (BR-6.4)**. pms.top_talent already
+  captured nine_box_cell per employee (entered via the existing
+  Calibration screen) but there was no aggregated VIEW of it anywhere —
+  only per-row entry. New GET /pms/nine-box?level=org|department|manager
+  aggregates the current cycle's top_talent rows into named groups, each
+  with counts and the actual people per cell (not just counts — HR needs
+  to see who, not just how many). Access: HR or Delivery Head (pms_admin
+  OR pms_hod) — wider than /watchlist's HR-only, matching BR-6.4's stated
+  audience specifically. Frontend: NineBoxPage.jsx (HR Admin > 9-Box Grid)
+  with a level toggle rendering an actual 3x3 grid per group. Verified via
+  test/nine-box.test.js (5 tests: org/department/manager grouping, HOD can
+  view, plain manager cannot, invalid level falls back to org rather than
+  erroring). 44/44 pass with DB attached (34/44, 10 skipped, without).
 - 28-Aug-2026: **Retention Alerts built (BR-6.6)** + **notification bell added
   to the frontend shell** (a cross-cutting gap found while building this:
   GET/POST /notifications had existed since Phase 0 with zero frontend

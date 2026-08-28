@@ -397,6 +397,46 @@ router.post('/calibration/adjust', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- 9-Box Grid — BR-6.4 -------------------------------------
+// Aggregates pms.top_talent entries (nine_box_cell values already captured
+// via the existing top-talent endpoint above) into the grid, at whichever
+// of the three levels the BRD names: org-wide, per-department, or per
+// reporting-line (each employee's direct manager). HR and Delivery Head
+// both get view access, per BR-6.4's stated audience — unlike /watchlist
+// (BR-6.5/6.6), which is HR/Management only.
+//
+// nine_box_cell convention (see frontend CalibrationPage.jsx's NINE_BOX
+// list, unchanged here): "<performance>-<potential>", each low|mid|high.
+router.get('/nine-box', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'pms_hod'))) {
+      return res.status(403).json({ error: "Requires 'pms_admin' or 'pms_hod'" });
+    }
+    const level = ['org', 'department', 'manager'].includes(req.query.level) ? req.query.level : 'org';
+    const c = await activeCycle(T(req));
+    if (!c) return res.status(409).json({ error: 'No active cycle' });
+    const rows = (await db.query(
+      `SELECT e.id, e.name, e.department, m.name AS manager_name, tt.nine_box_cell, tt.potential_rating
+         FROM pms.top_talent tt JOIN core.employees e ON e.id=tt.employee_id
+         LEFT JOIN core.employees m ON m.id=e.manager_id
+        WHERE tt.tenant_id=$1 AND tt.cycle_id=$2 AND tt.nine_box_cell IS NOT NULL`,
+      [T(req), c.id])).rows;
+
+    const groupKey = (r) => (level === 'department' ? (r.department || 'Unassigned') : level === 'manager' ? (r.manager_name || 'No manager') : 'Organisation');
+    const groups = new Map();
+    for (const r of rows) {
+      const key = groupKey(r);
+      if (!groups.has(key)) groups.set(key, { key, total: 0, cells: {} });
+      const g = groups.get(key);
+      g.total++;
+      const cellKey = r.nine_box_cell;
+      if (!g.cells[cellKey]) g.cells[cellKey] = [];
+      g.cells[cellKey].push({ id: r.id, name: r.name });
+    }
+    res.json({ cycle: { id: c.id, name: c.name }, level, groups: [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/calibration/top-talent', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
