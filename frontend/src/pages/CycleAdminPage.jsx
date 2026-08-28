@@ -13,7 +13,9 @@ export default function CycleAdminPage() {
   const create = async () => {
     const name = prompt('Cycle name (e.g. FY26 Annual Appraisal)'); if (!name) return;
     const fy = prompt('Fiscal year label (e.g. FY26)') || 'FY26';
-    try { await api('/pms/cycles', { method: 'POST', body: JSON.stringify({ name, fiscal_year: fy }) }); load(); }
+    const typeRaw = (prompt('Cycle type — type exactly "annual" or "midyear"', 'annual') || 'annual').trim().toLowerCase();
+    const cycle_type = typeRaw === 'midyear' ? 'midyear' : 'annual';
+    try { await api('/pms/cycles', { method: 'POST', body: JSON.stringify({ name, fiscal_year: fy, cycle_type }) }); load(); }
     catch (e) { setErr(e.message); }
   };
   const phase = async (c, to, rollback) => {
