@@ -1,9 +1,28 @@
 # Agentic PMS — per-client Render blueprint (dev/reference; client prod may
 # be their own cloud per deploy-and-transfer). One instance = one tenant.
+#
+# TESTING/POC CONFIG: both the api service and the database are pinned to
+# Render's free plan below. Two real, known limitations of that tier —
+# not bugs in this app — worth knowing before UAT:
+#   1. Free web services sleep after 15 minutes idle, waking on the next
+#      request (30-60s cold start). The daily Quarterly Connect reminder
+#      check (server/index.js's setInterval, wired to BR-4.4) won't fire
+#      reliably while asleep — it only runs at boot and once every 24h
+#      while the process happens to be awake. For testing THAT specific
+#      feature, trigger it on demand instead: POST /pms/connects/check-
+#      reminders (HR-only) runs the same check immediately, asleep or not.
+#   2. Free Postgres databases expire 30 days after creation. Fine for a
+#      testing window; must be upgraded (or recreated) before that, or
+#      before any real production use, or the data is gone.
+# Before going to real production: remove both `plan: free` lines below
+# (or set an explicit paid plan) so the app is always-on and the database
+# is durable — no code changes needed either way, this is purely an
+# infrastructure-tier choice.
 services:
   - type: web
     name: agentic-pms-api
     env: node
+    plan: free
     rootDir: server
     buildCommand: npm install
     startCommand: node index.js
@@ -50,3 +69,4 @@ services:
           property: host
 databases:
   - name: agentic-pms-db
+    plan: free
