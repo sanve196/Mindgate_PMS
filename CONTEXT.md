@@ -14,6 +14,44 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Ran against a real Postgres for the first time** (previously
+  only ever tested against in-memory/no-DB unit tests). Migrations 001-005
+  all run clean start-to-finish on Postgres 16. Found and fixed two real
+  bugs only a real DB surfaces: (1) POST /pms/connects inserted kra_ids with
+  an untyped NULL vs '{}' COALESCE, erroring "uuid[] vs text" on every call
+  — BR-4.1 (Quarterly Connect logging) had never actually been exercised
+  end-to-end despite being marked Completed. Fixed with explicit ::uuid[]
+  casts. (2) New tenants created after migration 002 (i.e. every normal
+  boot of a fresh deploy, since the tenant is created AFTER migrations run)
+  got ZERO role_permissions rows — every route 403'd. Fixed: ensureTenantSeeds()
+  now runs at boot right after tenant resolution, idempotent. This was a
+  deploy-blocking bug that would have hit Bucket 2 (Deployment & Environment
+  Setup) directly. test/consent.test.js integration-tests both fixes'
+  surrounding behaviour live against Postgres (skips cleanly without
+  DATABASE_URL so plain `npm test` still needs no DB).
+- 28-Aug-2026: BR-1.1 bulk Excel upload — core/employees.js now accepts
+  .xlsx (via exceljs; NOT the `xlsx`/SheetJS package, which has two
+  unpatched high-severity advisories) alongside the existing CSV path, both
+  funnelled into one validateEmployeeRows() so behaviour is identical.
+  Legacy .xls is explicitly rejected with a clear message (that format
+  needs a different parser entirely; no safe npm option currently exists).
+  tools/sample-employees.xlsx added. 6 new tests (employees.test.js: 9→15).
+- 28-Aug-2026: Employee consent capture (BRD §6 NFR) — core/consent.js.
+  New core.employee_consents table (migration 005); hasConsent()/
+  requireConsent() are the gate ANY meeting-recording/transcription/
+  calendar-pull feature must call. Only the employee themself can grant/
+  revoke their own consent (pms_self) — managers/HR get view-only. Wired
+  into the one concrete point that exists today: POST /pms/connects
+  meeting_based=true 403s without consent. No calendar/meeting-tool
+  integration exists yet to consume this (that's still a separate, unbuilt
+  item) — this lays the gate down ready for it. Verified end-to-end
+  live against Postgres: grant → allowed, revoke → blocked again, audit_log
+  captures both, manager view-only confirmed (no route exists for a manager
+  to set it).
+- Delivery Head (BR-8.1) — CORRECTION: this already exists, under the name
+  "HOD" (pms.hod_evaluations, /pms/hod/queue, HodQueuePage.jsx). Functionally
+  complete (routes to HOD before HR calibration/publish). Only a naming/
+  relabelling task remains to align with BRD terminology, not a build task.
 - Phase 0 (People Core): SCAFFOLDED 27-Aug-2026 — runner, schema 001,
   auth (JWT + dev-login), permissions (parity gate), employees mirror +
   validated CSV import (9/9 tests), seed 002, deploy files, frontend shell.

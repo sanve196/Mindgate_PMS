@@ -27,6 +27,12 @@ async function main() {
     logger.info('tenant created', { slug });
   }
   const TENANT_ID = t.id;
+  // New tenants created after migration 002 ran (i.e. every normal boot of a
+  // fresh deploy, since the tenant row above is created AFTER migrations)
+  // otherwise get zero role_permissions rows and every route 403s — this
+  // was found by actually running the app against a real Postgres for the
+  // first time. Idempotent (ON CONFLICT DO NOTHING), safe on every boot.
+  await require('./migrations/002-default-permission-bundles').ensureTenantSeeds(db, TENANT_ID);
 
   const app = express();
   app.use(cors());
@@ -38,6 +44,7 @@ async function main() {
   app.get('/api/v1/me', authenticate, (req, res) => res.json({ user: req.user }));
 
   app.use('/api/v1/employees', employees.router);
+  app.use('/api/v1/consent', require('./core/consent').router);
   app.use('/api/v1/notifications', require('./core/notifications').router);
   app.use('/api/v1/pms', require('./modules/performance').router);
   app.use('/api/v1/engagement', require('./modules/engagement').router);

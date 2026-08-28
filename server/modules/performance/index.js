@@ -14,6 +14,7 @@ const logger = require('../../core/logger');
 const { authenticate } = require('../../core/auth');
 const { apiPermissionParity, hasPermission } = require('../../core/permissions');
 const { notify } = require('../../core/notifications');
+const { requireConsent } = require('../../core/consent');
 const pm = require('./phase-machine');
 
 const router = express.Router();
@@ -434,17 +435,25 @@ router.get('/my/rating', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// meeting_based=true marks this log as populated from a recorded/transcribed
+// meeting or a calendar/meeting-tool pull (BRD §6 NFR) rather than typed in
+// directly by the manager/employee. That path is gated on the employee's
+// own explicit consent — requireConsent() 403s before anything is written
+// if it is missing. A plain typed-in log (meeting_based omitted or false)
+// is unaffected and needs no consent, since nothing is being
+// recorded/transcribed on the employee's behalf in that case.
 router.post('/connects', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
-    const { employee_id, held_at, notes, kra_ids } = req.body || {};
+    const { employee_id, held_at, notes, kra_ids, meeting_based } = req.body || {};
     if (!employee_id || !held_at) return res.status(400).json({ error: 'employee_id and held_at required' });
+    if (meeting_based) await requireConsent(T(req), employee_id);
     await db.query(
-      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, notes, kra_ids)
-       VALUES ($1,$2,$3,$4,$5,COALESCE($6,'{}'))`,
-      [T(req), req.user.id, employee_id, held_at, notes || null, Array.isArray(kra_ids) ? kra_ids : null]);
+      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, notes, kra_ids, meeting_based)
+       VALUES ($1,$2,$3,$4,$5,COALESCE($6::uuid[],'{}'::uuid[]),$7)`,
+      [T(req), req.user.id, employee_id, held_at, notes || null, Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 router.get('/connects', async (req, res) => {
