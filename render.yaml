@@ -68,18 +68,20 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     envVars:
-      # Injected at BUILD time (Vite bakes env vars into the static bundle
-      # at build, not runtime) — the api service's Render host, so
-      # production API calls go to the real backend domain instead of a
-      # relative path that would hit this static site's own domain. See
-      # frontend/src/utils/api.jsx's API_BASE for the client-side half of
-      # this. Local dev needs no equivalent — vite.config.js's dev-server
-      # proxy handles relative /api paths during `npm run dev`.
+      # BUG FOUND VIA A LIVE DEPLOY, FIXED HERE: fromService's `property:
+      # host` returns the PRIVATE-NETWORK-ONLY hostname (confirmed against
+      # Render's own docs: "Web services and private services only. The
+      # service's hostname on the private network") — a browser can never
+      # resolve that; it produced net::ERR_NAME_NOT_RESOLVED for every API
+      # call in production. Fixed with the actual, confirmed-working public
+      # hostname (verified directly: this exact URL returned a real
+      # response at /api/v1/health) as a plain literal value instead of a
+      # dynamic reference — after getting two different fromService
+      # mechanics wrong across this deploy, a hardcoded value that is known
+      # to work beats a third guess at the "correct" dynamic property name.
+      # If the api service is ever renamed, update this literal to match.
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: agentic-pms-api
-          property: host
+        value: agentic-pms-api.onrender.com
 databases:
   - name: agentic-pms-db
     plan: basic-256mb
