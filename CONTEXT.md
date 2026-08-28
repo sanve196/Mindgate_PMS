@@ -14,6 +14,26 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 28-Aug-2026: **Org-wide KRA overview + enter-on-behalf built (BR-1.1/1.4)**
+  — found to be another gap in the same vein as Development Plan/Career
+  Path: /team/kra-sheets was manager-scoped only (WHERE manager_id=
+  req.user.id), and every KRA edit/submit route was hardcoded to
+  req.user.id, so HR had no org-wide view and literally could not enter a
+  KRA on someone else's behalf despite BR-1.4 requiring it. New
+  GET /pms/kra/org-overview (HR-only, status counters + search across
+  every active employee, "not_started" for anyone with zero sheet rows —
+  not just missing from the list); new GET/PUT/POST
+  /pms/hr/kra-sheet/:employeeId(/kras)(/submit), mirroring the self-service
+  routes but parameterized by employee_id and gated pms_admin. Frontend:
+  new KraOrgOverviewPage.jsx (HR Admin > KRA Overview) — counters, search,
+  inline "Enter on behalf" editor per row. Verified with a clean
+  production build. test/kra-org-overview.test.js: 5 integration tests
+  (org-wide visibility including HR/manager's own accounts correctly
+  counted, search, admin-only gate, full enter-on-behalf lifecycle,
+  manager blocked from the HR-only routes). Caught my own test's missing
+  role-seed mistake (forgot to give the HR test user the 'hr' role) before
+  trusting the result. 66/66 pass with DB attached (40/66, 26 skipped,
+  without).
 - 28-Aug-2026: **Development Plan (BR-2.1/2.2/2.3) + Career Path
   (BR-3.1/3.2) built** — found to be entirely missing (Development Plan)
   or half-built (Career Path — HR-admin matrix config existed, zero

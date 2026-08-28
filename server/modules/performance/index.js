@@ -210,6 +210,110 @@ router.post('/team/kra-sheets/:sheetId/decide', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- HR: org-wide KRA overview + enter-on-behalf — BR-1.1/1.4 -
+// FOUND MISSING 28-Aug-2026: /team/kra-sheets (above) is manager-scoped
+// (WHERE manager_id=req.user.id) — there was no HR-wide view across every
+// employee, and every KRA edit/submit route was hardcoded to req.user.id,
+// so HR literally could not enter a KRA on someone else's behalf despite
+// BR-1.4 requiring it. This section is the fix: an org-wide status view
+// with search, and HR-scoped edit/submit routes parameterized by
+// employee_id instead of assuming "self".
+router.get('/kra/org-overview', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, counters: {}, employees: [] });
+    const q = (req.query.q || '').trim();
+    const rows = (await db.query(
+      `SELECT e.id AS employee_id, e.name, e.department, m.name AS manager_name,
+              s.id AS sheet_id, COALESCE(s.status, 'not_started') AS status,
+              (SELECT COUNT(*)::int FROM pms.kras k WHERE k.sheet_id=s.id) AS kra_count
+         FROM core.employees e
+         LEFT JOIN core.employees m ON m.id=e.manager_id
+         LEFT JOIN pms.kra_sheets s ON s.cycle_id=$1 AND s.employee_id=e.id
+        WHERE e.tenant_id=$2 AND e.status='active'
+          ${q ? "AND (e.name ILIKE $3 OR e.email ILIKE $3 OR e.department ILIKE $3)" : ''}
+        ORDER BY e.name`,
+      q ? [c.id, T(req), `%${q}%`] : [c.id, T(req)])).rows;
+    const counters = { draft: 0, submitted: 0, returned: 0, approved: 0, not_started: 0 };
+    for (const r of rows) counters[r.status] = (counters[r.status] || 0) + 1;
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, counters, employees: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ensures a sheet row exists for the target employee, same auto-create
+// behaviour as GET /my/kra-sheet, so "enter on behalf" starts from the
+// same clean state a self-service edit would.
+async function ensureKraSheet(tenantId, cycleId, employeeId) {
+  let s = (await db.query(`SELECT * FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [cycleId, employeeId])).rows[0];
+  if (!s) {
+    const mgr = (await db.query(`SELECT manager_id FROM core.employees WHERE id=$1`, [employeeId])).rows[0];
+    s = (await db.query(
+      `INSERT INTO pms.kra_sheets (tenant_id, cycle_id, employee_id, manager_id) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [tenantId, cycleId, employeeId, mgr ? mgr.manager_id : null])).rows[0];
+  }
+  return s;
+}
+
+router.get('/hr/kra-sheet/:employeeId', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, sheet: null, kras: [] });
+    const emp = (await db.query(`SELECT id, name FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    const s = await ensureKraSheet(T(req), c.id, emp.id);
+    const kras = (await db.query(`SELECT * FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [s.id])).rows;
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, employee: emp, sheet: s, kras, weights: pm.weightsValid(kras) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/hr/kra-sheet/:employeeId/kras', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'kra_edit')) return res.status(409).json({ error: `KRA editing is not open (phase: ${c ? c.phase : 'none'})` });
+    const s = await ensureKraSheet(T(req), c.id, req.params.employeeId);
+    if (s.status === 'approved') return res.status(409).json({ error: 'sheet is approved — return it for edits first' });
+    const kras = Array.isArray(req.body && req.body.kras) ? req.body.kras : [];
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM pms.kras WHERE sheet_id=$1`, [s.id]);
+      let i = 0;
+      for (const k of kras) {
+        if (!k.title || !String(k.title).trim()) continue;
+        await client.query(
+          `INSERT INTO pms.kras (tenant_id, sheet_id, title, description, weight, measures, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [T(req), s.id, String(k.title).trim(), k.description || null, Number(k.weight) || 0, k.measures || null, (i += 10)]);
+      }
+      await client.query(`UPDATE pms.kra_sheets SET status='draft', updated_at=now() WHERE id=$1`, [s.id]);
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    const saved = (await db.query(`SELECT * FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [s.id])).rows;
+    audit(req, 'KRA_ENTERED_ON_BEHALF', c.id, req.params.employeeId, { kras: saved.length });
+    res.json({ ok: true, kras: saved, weights: pm.weightsValid(saved) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/hr/kra-sheet/:employeeId/submit', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'kra_submit')) return res.status(409).json({ error: 'KRA submission is not open' });
+    const s = (await db.query(`SELECT * FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.params.employeeId])).rows[0];
+    if (!s) return res.status(404).json({ error: 'sheet not found' });
+    const kras = (await db.query(`SELECT weight FROM pms.kras WHERE sheet_id=$1`, [s.id])).rows;
+    const w = pm.weightsValid(kras);
+    if (!kras.length) return res.status(422).json({ error: 'Add at least one KRA before submitting' });
+    if (!w.ok) return res.status(422).json({ error: `KRA weights must total 100 (currently ${w.total})` });
+    await db.query(`UPDATE pms.kra_sheets SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1`, [s.id]);
+    audit(req, 'KRA_SUBMITTED_ON_BEHALF', c.id, req.params.employeeId, { kras: kras.length });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- Development Plan (Org IDP) — BR-2.1/2.2/2.3 --------------
 // Mirrors the KRA sheet pattern above deliberately: same draft/submitted/
 // approved/returned lifecycle, same kra_open phase window (new devplan_*

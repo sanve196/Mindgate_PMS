@@ -17,6 +17,7 @@ import WatchlistPage from './pages/WatchlistPage';
 import NotificationBell from './pages/NotificationBell';
 import NineBoxPage from './pages/NineBoxPage';
 import MyGrowthPage from './pages/MyGrowthPage';
+import KraOrgOverviewPage from './pages/KraOrgOverviewPage';
 
 const NAV = [
   { group: 'My Performance', items: [
@@ -34,6 +35,7 @@ const NAV = [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
     { to: '/admin/directory', label: 'Employees', icon: Upload },
+    { to: '/admin/kra-overview', label: 'KRA Overview', icon: ClipboardList },
     { to: '/admin/watchlist', label: 'Super 50', icon: Award },
     { to: '/admin/nine-box', label: '9-Box Grid', icon: Grid3x3 },
   ]},
@@ -95,6 +97,7 @@ export default function App() {
             <Route path="/admin/cycles" element={<CycleAdminPage />} />
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<DirectoryPage />} />
+            <Route path="/admin/kra-overview" element={<KraOrgOverviewPage />} />
             <Route path="/admin/watchlist" element={<WatchlistPage />} />
             <Route path="/admin/nine-box" element={<NineBoxPage />} />
             <Route path="/engagement" element={<EngagementPage />} />
