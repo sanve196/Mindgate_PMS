@@ -220,6 +220,14 @@ router.get('/drafts', async (req, res) => {
 // an individual employee's own 1-on-1 CONNECT notes, which is a distinct
 // requirement (attributed to a specific employee, not anonymous, and
 // explicitly links back to KRA ids already stored per connect).
+//
+// UPDATED: migration 017 replaced the old single `notes` blob with a
+// dedicated `discussion_notes` field (achievements/blockers/feedback are
+// now their own columns, populated via /connect-extract below, not part
+// of the free-text notes at all) — this was reading `cn.notes`, which
+// new connects never populate anymore, so it would have silently stopped
+// finding anything to summarise. Caught while building the extraction
+// endpoint below and fixed here rather than shipped broken.
 router.post('/connect-insights', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
@@ -229,8 +237,9 @@ router.post('/connect-insights', async (req, res) => {
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const connects = (await db.query(
-      `SELECT cn.held_at, cn.notes, cn.kra_ids FROM pms.connects cn
-        WHERE cn.tenant_id=$1 AND cn.employee_id=$2 AND cn.notes IS NOT NULL AND length(trim(cn.notes))>0
+      `SELECT cn.held_at, COALESCE(cn.discussion_notes, cn.notes) AS notes, cn.kra_ids FROM pms.connects cn
+        WHERE cn.tenant_id=$1 AND cn.employee_id=$2 AND COALESCE(cn.discussion_notes, cn.notes) IS NOT NULL
+          AND length(trim(COALESCE(cn.discussion_notes, cn.notes)))>0
         ORDER BY cn.held_at DESC LIMIT 8`, [T(req), employee_id])).rows;
     if (!connects.length) return res.status(422).json({ error: 'No logged connects with notes to summarise yet' });
     const kraIds = [...new Set(connects.flatMap((c) => c.kra_ids || []))];
@@ -252,6 +261,37 @@ Respond ONLY with JSON:
 {"themes":[{"name":"...","summary":"1-2 sentences","related_kra":"KRA title or null"}],"sentiment_trend":"one sentence","suggested_followups":["..."]}`,
     });
     res.json({ ok: true, ...out });
+  } catch (e) { fail(res, e); }
+});
+
+// 7) Connect extract — the piece that makes "Achievements / Blockers /
+// Feedback are derived from the discussion, not typed separately" real.
+// Input is the raw "What was discussed?" text the manager just typed for
+// ONE connect (not yet saved) plus optional Topic for context; output is
+// a draft split into the three fields, which the manager can accept as-is
+// or edit before saving — same "draft, human decides" pattern as every
+// other AI feature here (appraisal-draft, calibration-brief, etc.). This
+// does not read or write pms.connects at all; it is pure text-in/text-out,
+// callable before the connect exists.
+router.post('/connect-extract', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const { discussion_notes, topic } = req.body || {};
+    if (!discussion_notes || !String(discussion_notes).trim()) return res.status(400).json({ error: 'discussion_notes required' });
+    const input = { topic: topic || null, discussion_notes: String(discussion_notes).trim() };
+    const out = await ai.narrate({
+      tenantId: T(req), kind: 'connect_extract', ref: {},
+      requestedBy: req.user.email, input, maxTokens: 600,
+      system: `You split a manager's raw notes from a 1-on-1 conversation with an employee into
+three categories: what the employee achieved or did well (Achievements), anything
+stuck or needing help (Blockers), and coaching or direction the manager gave
+(Feedback). Ground every sentence in the input; invent nothing not implied by the
+notes. If the notes don't clearly cover one of the three categories, return an
+empty string for it rather than guessing or padding.
+Respond ONLY with JSON:
+{"achievements":"...","blockers":"...","feedback":"..."}`,
+    });
+    res.json({ ok: true, draft: out });
   } catch (e) { fail(res, e); }
 });
 

@@ -1380,13 +1380,18 @@ router.post('/connects', async (req, res) => {
     // own fields, not one free-text blob. `notes` is still accepted for
     // backward compatibility with anything already calling this route, but
     // new callers (the updated ConnectsPage) send the three fields instead.
-    const { employee_id, held_at, notes, achievements, blockers, feedback, kra_ids, meeting_based } = req.body || {};
+    // duration_min/topic/discussion_notes added per a follow-up request:
+    // the manager logs what was actually discussed, and achievements/
+    // blockers/feedback are meant to be DERIVED from it (via
+    // /agentic/connect-extract) rather than typed from scratch.
+    const { employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based } = req.body || {};
     if (!employee_id || !held_at) return res.status(400).json({ error: 'employee_id and held_at required' });
     if (meeting_based) await requireConsent(T(req), employee_id);
     await db.query(
-      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, notes, achievements, blockers, feedback, kra_ids, meeting_based)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::uuid[],'{}'::uuid[]),$10)`,
-      [T(req), req.user.id, employee_id, held_at, notes || null, achievements || null, blockers || null, feedback || null,
+      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::uuid[],'{}'::uuid[]),$13)`,
+      [T(req), req.user.id, employee_id, held_at, duration_min != null ? Number(duration_min) : null, topic || null, discussion_notes || null,
+        notes || null, achievements || null, blockers || null, feedback || null,
         Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based]);
     audit(req, 'CONNECT_LOGGED', null, employee_id, { held_at });
     res.json({ ok: true });

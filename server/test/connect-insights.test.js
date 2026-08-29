@@ -77,3 +77,43 @@ test('connect-insights: requires employee_id, blocks an unrelated manager, 422s 
   const noNotes = await api('/agentic/connect-insights', mgrAuth.token, { method: 'POST', body: JSON.stringify({ employee_id: empId }) });
   assert.equal(noNotes.status, 422, 'no logged connects with notes yet — nothing to summarise');
 });
+
+// Regression test: migration 017 replaced the old single `notes` column
+// with `discussion_notes` (achievements/blockers/feedback are now their
+// own columns) — this endpoint was still reading `cn.notes`, which new
+// connects never populate, so it would silently 422 forever even with
+// real logged connects. Caught and fixed while building /connect-extract.
+test('connect-insights: finds connects logged with the new discussion_notes field, not just the legacy notes column', { skip }, async () => {
+  const t = (await db.query(`SELECT tenant_id FROM core.employees WHERE id=$1`, [empId])).rows[0].tenant_id;
+  const mgr = (await db.query(`SELECT id FROM core.employees WHERE email='ci-mgr@x.com' AND tenant_id=$1`, [t])).rows[0];
+  await db.query(
+    `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, discussion_notes) VALUES ($1,$2,$3,'2026-06-01','Discussed Q2 progress, on track')`,
+    [t, mgr.id, empId]);
+
+  const mgrAuth = await login('ci-mgr@x.com');
+  // Still hits the real AI call past this point (no ANTHROPIC_API_KEY in
+  // this sandbox) — asserting it gets PAST the 422 "nothing to summarise"
+  // guard is exactly what confirms the column-name fix, without needing
+  // the AI call itself to succeed.
+  const r = await api('/agentic/connect-insights', mgrAuth.token, { method: 'POST', body: JSON.stringify({ employee_id: empId }) });
+  assert.notEqual(r.status, 422, 'a connect with discussion_notes should be found, not treated as "no notes"');
+});
+
+// New: /connect-extract — the piece that derives Achievements/Blockers/
+// Feedback from "What was discussed?" rather than the manager typing all
+// three from scratch.
+test('connect-extract: requires discussion_notes, requires pms_team_eval', { skip }, async () => {
+  const mgrAuth = await login('ci-mgr@x.com');
+  const strangerAuth = await login('ci-stranger@x.com');
+
+  const empty = await api('/agentic/connect-extract', mgrAuth.token, { method: 'POST', body: JSON.stringify({}) });
+  assert.equal(empty.status, 400);
+
+  const whitespaceOnly = await api('/agentic/connect-extract', mgrAuth.token, { method: 'POST', body: JSON.stringify({ discussion_notes: '   ' }) });
+  assert.equal(whitespaceOnly.status, 400);
+
+  // A stranger with no pms_team_eval permission should be blocked before
+  // any AI call is attempted, same as every other manager-only endpoint.
+  const blocked = await api('/agentic/connect-extract', strangerAuth.token, { method: 'POST', body: JSON.stringify({ discussion_notes: 'Talked about the Q2 launch' }) });
+  assert.equal(blocked.status, 403);
+});

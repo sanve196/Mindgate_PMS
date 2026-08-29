@@ -36,11 +36,18 @@ export default function ConnectsPage() {
 function NewConnectForm({ onSaved }) {
   const [employeeId, setEmployeeId] = useState('');
   const [heldAt, setHeldAt] = useState(new Date().toISOString().slice(0, 10));
-  // Fix guide item #8 (BR-4.2): three separate fields instead of one
-  // "Achievements, blockers, feedback…" free-text box.
+  // Requested: manager logs Date, Duration, Topic, and what was actually
+  // discussed — and Achievements/Blockers/Feedback are DERIVED from that
+  // discussion (via /agentic/connect-extract) rather than typed separately
+  // from scratch as three unrelated boxes.
+  const [durationMin, setDurationMin] = useState('30');
+  const [topic, setTopic] = useState('');
+  const [discussionNotes, setDiscussionNotes] = useState('');
   const [achievements, setAchievements] = useState('');
   const [blockers, setBlockers] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState(false);
   const [team, setTeam] = useState(null);
   const [kraOptions, setKraOptions] = useState([]);
   const [kraIds, setKraIds] = useState([]);
@@ -57,26 +64,53 @@ function NewConnectForm({ onSaved }) {
 
   const toggleKra = (id) => setKraIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
 
+  const extract = async () => {
+    if (!discussionNotes.trim()) { setErr('Add what was discussed first — there\'s nothing to draft from yet.'); return; }
+    setExtracting(true); setErr(null);
+    try {
+      const r = await api('/agentic/connect-extract', { method: 'POST', body: JSON.stringify({ discussion_notes: discussionNotes, topic }) });
+      setAchievements(r.draft.achievements || '');
+      setBlockers(r.draft.blockers || '');
+      setFeedback(r.draft.feedback || '');
+      setExtracted(true);
+    } catch (e) { setErr(e.message); }
+    setExtracting(false);
+  };
+
   const save = async () => {
     setErr(null);
     if (!employeeId || !heldAt) { setErr('Employee and date are required.'); return; }
     try {
       await api('/pms/connects', {
         method: 'POST',
-        body: JSON.stringify({ employee_id: employeeId, held_at: heldAt, achievements, blockers, feedback, kra_ids: kraIds }),
+        body: JSON.stringify({
+          employee_id: employeeId, held_at: heldAt, duration_min: durationMin || null, topic, discussion_notes: discussionNotes,
+          achievements, blockers, feedback, kra_ids: kraIds,
+        }),
       });
       onSaved();
     } catch (e) { setErr(e.message); }
   };
 
   return (
-    <div className="card p-4 space-y-2">
-      <div className="flex gap-2">
-        <select className="inp" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+    <div className="card p-4 space-y-3">
+      <div className="grid sm:grid-cols-3 gap-2">
+        <select className="inp sm:col-span-1" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
           <option value="">Select report…</option>
           {(team || []).map(t => <option key={t.employee_id} value={t.employee_id}>{t.name}</option>)}
         </select>
-        <input className="inp w-40" type="date" value={heldAt} onChange={e => setHeldAt(e.target.value)} />
+        <div>
+          <label className="lbl">Date</label>
+          <input className="inp" type="date" value={heldAt} onChange={e => setHeldAt(e.target.value)} />
+        </div>
+        <div>
+          <label className="lbl">Duration (min)</label>
+          <input className="inp" type="number" min="0" step="5" value={durationMin} onChange={e => setDurationMin(e.target.value)} />
+        </div>
+      </div>
+      <div>
+        <label className="lbl">Topic (optional)</label>
+        <input className="inp" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g. Mid-quarter check-in" />
       </div>
       {employeeId && kraOptions.length > 0 && (
         <div>
@@ -90,12 +124,30 @@ function NewConnectForm({ onSaved }) {
           </div>
         </div>
       )}
-      <div><label className="lbl">Achievements</label>
-        <textarea className="inp" rows={2} placeholder="What went well since the last connect…" value={achievements} onChange={e => setAchievements(e.target.value)} /></div>
-      <div><label className="lbl">Blockers</label>
-        <textarea className="inp" rows={2} placeholder="Anything holding progress up…" value={blockers} onChange={e => setBlockers(e.target.value)} /></div>
-      <div><label className="lbl">Feedback</label>
-        <textarea className="inp" rows={2} placeholder="Feedback for the employee…" value={feedback} onChange={e => setFeedback(e.target.value)} /></div>
+      <div>
+        <label className="lbl">What was discussed?</label>
+        <textarea className="inp" rows={4} placeholder="Catch-all narrative — what came up in the conversation"
+          value={discussionNotes} onChange={e => { setDiscussionNotes(e.target.value); setExtracted(false); }} />
+      </div>
+      <button type="button" className="btn-sec" disabled={extracting} onClick={extract}>
+        <Sparkles size={13} className="inline mr-1 text-amber-500" />{extracting ? 'Drafting…' : 'Draft Achievements / Blockers / Feedback (agent)'}
+      </button>
+      {extracted && <DraftBadge />}
+      <div className="grid sm:grid-cols-3 gap-2">
+        <div>
+          <label className="lbl text-emerald-600">Achievements</label>
+          <textarea className="inp border-emerald-200" rows={3} placeholder="What went well…" value={achievements} onChange={e => setAchievements(e.target.value)} />
+        </div>
+        <div>
+          <label className="lbl text-amber-600">Blockers</label>
+          <textarea className="inp border-amber-200" rows={3} placeholder="What's stuck…" value={blockers} onChange={e => setBlockers(e.target.value)} />
+        </div>
+        <div>
+          <label className="lbl text-blue-600">Feedback</label>
+          <textarea className="inp border-blue-200" rows={3} placeholder="Coaching / direction…" value={feedback} onChange={e => setFeedback(e.target.value)} />
+        </div>
+      </div>
+      <p className="text-[11px] text-navy-400">These are drafted from "What was discussed?" above — review and edit before saving; nothing here is final until you save.</p>
       {err && <p className="text-xs text-rose-600">{err}</p>}
       <button className="btn-pri" onClick={save}>Save connect</button>
     </div>
@@ -124,12 +176,17 @@ function ConnectRow({ cn, reload }) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-semibold">{cn.employee_name} <span className="text-navy-400 font-normal">with {cn.manager_name}</span></p>
-          <p className="text-xs text-navy-400">{new Date(cn.held_at).toLocaleDateString()}</p>
+          <p className="text-xs text-navy-400">
+            {new Date(cn.held_at).toLocaleDateString()}
+            {cn.duration_min != null && ` · ${cn.duration_min} min`}
+            {cn.topic && ` · ${cn.topic}`}
+          </p>
         </div>
         <span className={`chip flex items-center gap-1 ${cn.signed_off ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
           {cn.signed_off ? <CheckCircle2 size={12} /> : <Clock size={12} />}{cn.signed_off ? 'Signed off' : 'Pending sign-off'}
         </span>
       </div>
+      {cn.discussion_notes && <p className="text-xs text-navy-500 italic">"{cn.discussion_notes}"</p>}
       <div className="text-xs text-navy-600 space-y-1">
         {cn.achievements && <p><b className="text-navy-500">Achievements:</b> {cn.achievements}</p>}
         {cn.blockers && <p><b className="text-navy-500">Blockers:</b> {cn.blockers}</p>}

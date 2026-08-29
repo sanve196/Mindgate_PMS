@@ -98,3 +98,28 @@ test('connect sign-off: cannot sign off twice, and an unrelated manager cannot s
   const wrongUser = await api(`/pms/connects/${newCn.id}/sign-off`, strangerAuth.token, { method: 'POST' });
   assert.equal(wrongUser.status, 403);
 });
+
+// Requested with a reference screenshot: Date/Duration/Topic/"What was
+// discussed?" as their own fields, separate from the derived Achievements/
+// Blockers/Feedback (migration 017).
+test('connect: duration, topic, and discussion notes round-trip through create and list', { skip }, async () => {
+  const mgrAuth = await login('so-mgr@x.com');
+  const created = await api('/pms/connects', mgrAuth.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      employee_id: empId, held_at: '2026-11-01', duration_min: 30, topic: 'Mid-quarter check-in',
+      discussion_notes: 'Discussed the Q3 launch timeline and blockers with legal.',
+      achievements: 'Shipped the beta', blockers: 'Waiting on legal sign-off', feedback: 'Keep pushing on the timeline',
+    }),
+  });
+  assert.equal(created.status, 200);
+
+  const list = await api('/pms/connects', mgrAuth.token);
+  const cn = list.body.connects.find((c) => c.topic === 'Mid-quarter check-in');
+  assert.ok(cn, 'the new connect should be in the list');
+  assert.equal(cn.duration_min, 30);
+  assert.equal(cn.discussion_notes, 'Discussed the Q3 launch timeline and blockers with legal.');
+  assert.equal(cn.achievements, 'Shipped the beta');
+  assert.equal(cn.blockers, 'Waiting on legal sign-off');
+  assert.equal(cn.feedback, 'Keep pushing on the timeline');
+});
