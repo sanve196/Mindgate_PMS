@@ -121,6 +121,19 @@ function EmployeePanel({ employee, onDone }) {
     catch (e) { setAccessErr(e.message); }
   };
 
+  // ---- Delete (destructive — requires typing the name to confirm) ----
+  const [confirmText, setConfirmText] = useState('');
+  const [deleteErr, setDeleteErr] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const doDelete = async () => {
+    setDeleteErr(null);
+    if (confirmText.trim() !== employee.name) { setDeleteErr(`Type "${employee.name}" exactly to confirm.`); return; }
+    setDeleting(true);
+    try { await api(`/employees/${employee.id}`, { method: 'DELETE' }); onDone(); }
+    catch (e) { setDeleteErr(e.message); setDeleting(false); }
+  };
+
   return (
     <div className="p-3 space-y-4 text-xs">
       <div className="space-y-2">
@@ -167,6 +180,25 @@ function EmployeePanel({ employee, onDone }) {
         </div>
         {accessErr && <p className="text-rose-600">{accessErr}</p>}
         {accessMsg && <p className="text-leaf-600">{accessMsg}</p>}
+      </div>
+
+      <div className="space-y-2 pt-3 border-t border-navy-100">
+        <p className="lbl text-rose-500">Delete employee — permanent</p>
+        <p className="text-[11px] text-navy-400">
+          Removes {employee.name} and everything that is fundamentally theirs (KRAs, self-appraisals, connects,
+          rating history, login, etc). If they managed anyone, those reports' own records are kept — only the
+          specific review rows that required a manager reference are removed with them. This cannot be undone.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="lbl">Type "{employee.name}" to confirm</label>
+            <input className="inp w-56" value={confirmText} onChange={e => setConfirmText(e.target.value)} />
+          </div>
+          <button className="btn text-white bg-rose-600 hover:bg-rose-700" disabled={deleting} onClick={doDelete}>
+            {deleting ? 'Deleting…' : 'Delete permanently'}
+          </button>
+        </div>
+        {deleteErr && <p className="text-rose-600">{deleteErr}</p>}
       </div>
     </div>
   );

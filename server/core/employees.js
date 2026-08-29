@@ -349,6 +349,106 @@ router.put('/:employeeId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Deletes one employee and everything that is fundamentally THEIRS,
+// inside a single transaction — either all of it succeeds, or none of
+// it does. people_admin-only.
+//
+// Two different things happen depending on which side of a relationship
+// this employee is on:
+//   1. Records that are their OWN (their KRAs, self-appraisals, connects
+//      logged about them, etc.) are deleted outright.
+//   2. Records where they appear as someone ELSE's manager/reviewer are
+//      handled two different ways depending on the schema: where that
+//      column is nullable (core.employees.manager_id, pms.kra_sheets.
+//      manager_id, pms.development_plans.manager_id), it's set to NULL —
+//      the other employee's own record is untouched, they just show as
+//      currently unmanaged. Where that column is NOT NULL by schema
+//      (pms.manager_evaluations.manager_id, pms.hod_evaluations.hod_id,
+//      pms.connects.manager_id, pms.connect_reminders_log.manager_id),
+//      there is no valid way to null it out, so THAT SPECIFIC ROW is
+//      deleted too — this removes the manager-side review record for a
+//      report, not the report's own underlying KRA/self-appraisal data,
+//      which is untouched. This is a real, structural consequence of
+//      deleting someone who was reviewing others, not a bug — worth
+//      knowing before deleting anyone who managed people.
+// core.local_credentials/user_roles/user_permissions are keyed by email,
+// not id, and are cleaned up by email for the same reason.
+router.delete('/:employeeId', async (req, res) => {
+  const client = await db.getClient();
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const T = req.user.tenant_id;
+    const id = req.params.employeeId;
+    const emp = (await db.query(`SELECT id, name, email FROM core.employees WHERE id=$1 AND tenant_id=$2`, [id, T])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.id === req.user.id) return res.status(422).json({ error: 'You cannot delete your own account while signed in as them.' });
+
+    await client.query('BEGIN');
+
+    // ---- Nullable manager-style references: preserve the OTHER employee's record ----
+    await client.query(`UPDATE core.employees SET manager_id=NULL WHERE tenant_id=$1 AND manager_id=$2`, [T, id]);
+    await client.query(`UPDATE pms.kra_sheets SET manager_id=NULL WHERE tenant_id=$1 AND manager_id=$2`, [T, id]);
+    await client.query(`UPDATE pms.development_plans SET manager_id=NULL WHERE tenant_id=$1 AND manager_id=$2`, [T, id]);
+    await client.query(`UPDATE people.award_nominations SET nominated_by=NULL WHERE tenant_id=$1 AND nominated_by=$2`, [T, id]);
+
+    // ---- NOT NULL manager-style references: the specific review row can't survive without one ----
+    await client.query(`DELETE FROM pms.manager_evaluations WHERE tenant_id=$1 AND manager_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.hod_evaluations WHERE tenant_id=$1 AND hod_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.connects WHERE tenant_id=$1 AND manager_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.connect_reminders_log WHERE tenant_id=$1 AND manager_id=$2`, [T, id]);
+    await client.query(`DELETE FROM people.award_nominations WHERE tenant_id=$1 AND nominated_by=$2`, [T, id]);
+
+    // ---- This employee's OWN records — cascades handle child rows
+    // automatically (pms.kras via sheet_id, pms.evidence via appraisal_id,
+    // pms.development_goals via plan_id, pms.pip_weekly_entries via pip_id,
+    // people.appraisal_query_messages via query_id — all ON DELETE CASCADE). ----
+    await client.query(`DELETE FROM core.department_heads WHERE employee_id=$1`, [id]);
+    await client.query(`DELETE FROM core.notifications WHERE employee_id=$1`, [id]);
+    await client.query(`DELETE FROM core.employee_consents WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.kra_sheets WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.self_appraisals WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.manager_evaluations WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.hod_evaluations WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.top_talent WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.pip_records WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.connects WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.employee_performance_history WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.closure_letters WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.parameter_scores WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.development_plans WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.connect_reminders_log WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM pms.pulse_checks WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM engagement.invitations WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM engagement.responses WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM people.event_rsvps WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM people.csr_participations WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM people.appraisal_queries WHERE tenant_id=$1 AND employee_id=$2`, [T, id]);
+    await client.query(`DELETE FROM people.award_nominations WHERE tenant_id=$1 AND nominee_id=$2`, [T, id]);
+
+    // ---- Login/permission rows, keyed by email not id ----
+    await client.query(`DELETE FROM core.local_credentials WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`, [T, emp.email]);
+    await client.query(`DELETE FROM core.user_roles WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`, [T, emp.email]);
+    await client.query(`DELETE FROM core.user_permissions WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`, [T, emp.email]);
+
+    // Audit entry BEFORE the employee row itself disappears, so the
+    // name/email are still known at the moment this is recorded.
+    await client.query(
+      `INSERT INTO core.audit_log (tenant_id, actor_email, action, entity, entity_id, details)
+       VALUES ($1,$2,'EMPLOYEE_DELETED','employees',$3,$4)`,
+      [T, req.user.email, id, JSON.stringify({ name: emp.name, email: emp.email })]);
+
+    await client.query(`DELETE FROM core.employees WHERE id=$1 AND tenant_id=$2`, [id, T]);
+
+    await client.query('COMMIT');
+    logger.info('employee deleted', { tenantId: T, deletedEmail: emp.email, by: req.user.email });
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // HR-provisioned login access — the ONLY way, right now, for anyone other
 // than the original one-time bootstrap admin to get a real login. Real
 // production auth is meant to be the client's SSO/IdP (core/auth.js's own

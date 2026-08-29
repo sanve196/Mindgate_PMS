@@ -14,6 +14,67 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 29-Aug-2026: **Employee deletion built.** Asked to delete test users and
+  for a delete option in the app — I don't have network access to the
+  live Render deployment to delete anyone myself (my sandbox can't reach
+  onrender.com at all), so I could only build the feature and hand back
+  exact steps to use it.
+  This was the most consequential route added this session, so it got
+  the most careful treatment. First mapped every table across all 11
+  migrations referencing employee_id/manager_id/hod_id/nominee_id/
+  nominated_by (~25 tables) — discovered almost NONE of them have a real
+  foreign-key constraint back to core.employees (only
+  core.department_heads and core.notifications do), meaning a naive
+  DELETE would silently leave 20+ tables full of orphaned rows rather
+  than erroring, which is worse than a clean FK violation would have
+  been.
+  New DELETE /employees/:employeeId (people_admin-only, core/employees.js),
+  a single transaction with two distinct behaviours depending on which
+  side of a relationship the employee is on: (1) records that are their
+  OWN are deleted outright (cascades handle child rows automatically —
+  pms.kras via sheet_id, pms.evidence via appraisal_id, pms.development_
+  goals via plan_id, pms.pip_weekly_entries via pip_id, all pre-existing
+  ON DELETE CASCADE); (2) records where they appear as someone ELSE's
+  manager/reviewer are nulled out where the column is nullable (preserves
+  the OTHER employee's own record untouched) or, where the schema has
+  that column as NOT NULL (pms.manager_evaluations.manager_id, pms.
+  hod_evaluations.hod_id, pms.connects.manager_id, pms.
+  connect_reminders_log.manager_id), that SPECIFIC review row is deleted
+  too — a real, documented, unavoidable consequence of the schema, not a
+  bug, and made explicit in both the code comments and the UI's warning
+  text rather than hidden. core.local_credentials/user_roles/
+  user_permissions (keyed by email, not id) are cleaned up separately.
+  An audit_log entry is written BEFORE the employee row disappears, so
+  who/what/when is still traceable afterward even though the employee
+  record itself is gone.
+  CAUGHT A REAL RISK IN MY OWN FIRST DRAFT before it ever ran: I'd
+  wrapped several of the ~25 deletes in .catch(() => {}) defensively —
+  but that's genuinely dangerous INSIDE a transaction, since Postgres
+  aborts the whole transaction server-side the moment any statement
+  fails, and a swallowed catch would mask the real cause while every
+  later statement in the same transaction fails too with a confusing
+  unrelated error. Removed all of them once I'd already verified (by
+  reading every migration directly) that every table/column referenced
+  genuinely exists — the defensiveness was unnecessary AND risky at the
+  same time.
+  Frontend: DirectoryPage.jsx's "Manage" panel gained a Delete section —
+  requires typing the employee's exact name to confirm (not just a
+  browser confirm() dialog) before the button enables, with the
+  survives-vs-removed distinction explained in the warning text itself.
+  VERIFIED LIVE end-to-end against real Postgres, the full real-world
+  path: imported a throwaway test employee via the actual CSV import
+  route, gave them a real login, confirmed they could log in (200),
+  deleted them, confirmed they no longer appear in the employee list,
+  and confirmed their login now correctly fails (401 Invalid
+  credentials) — not simulated, the exact sequence a real user would do.
+  test/employee-delete.test.js: 4 integration tests, including the single
+  hardest property to get right — deleting a MANAGER preserves their
+  REPORT's own KRA sheet (with manager_id correctly nulled) while
+  correctly removing the NOT-NULL manager_evaluations/connects rows that
+  literally cannot exist without a valid manager reference. All 4 passed
+  on the first real run, no test bugs this time.
+  126/126 backend tests pass (53/126, 73 skipped, without DB); clean
+  production build.
 - 29-Aug-2026: **Inline single-employee profile edit built** — asked
   directly whether designation/department/etc. could be edited after
   import; the honest answer was "only by re-uploading the whole file,"
