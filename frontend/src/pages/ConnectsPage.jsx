@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, CheckCircle2, Clock, Sparkles } from 'lucide-react';
+import { Plus, CheckCircle2, Clock, Sparkles, Trash2 } from 'lucide-react';
 import { api, DraftBadge } from '../utils/api';
 
 export default function ConnectsPage() {
@@ -51,18 +51,28 @@ function NewConnectForm({ onSaved }) {
   const [team, setTeam] = useState(null);
   const [kraOptions, setKraOptions] = useState([]);
   const [kraIds, setKraIds] = useState([]);
+  // "Connect Cadence / Progress this cycle / Next due" header, per the
+  // reference screenshot — meaningful once an employee is picked, since
+  // it's cadence tracking FOR that specific report.
+  const [cadence, setCadence] = useState(null);
+  // Action items — built up locally before the connect exists at all;
+  // sent together with the connect on save (migration 018).
+  const [actionItems, setActionItems] = useState([]);
   const [err, setErr] = useState(null);
   useEffect(() => { api('/pms/team/evaluations').then(r => setTeam(r.team || [])).catch(() => setTeam([])); }, []);
 
-  // Fetch the selected employee's current KRAs to link against, rather
-  // than the manager typing KRA references from memory.
   useEffect(() => {
-    setKraIds([]);
+    setKraIds([]); setCadence(null);
     if (!employeeId) { setKraOptions([]); return; }
     api(`/pms/connects/kra-options/${employeeId}`).then(r => setKraOptions(r.kras || [])).catch(() => setKraOptions([]));
+    api(`/pms/connects/cadence/${employeeId}`).then(setCadence).catch(() => setCadence(null));
   }, [employeeId]);
 
   const toggleKra = (id) => setKraIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+
+  const addActionItem = () => setActionItems(items => [...items, { description: '', due_date: '' }]);
+  const updateActionItem = (i, field, value) => setActionItems(items => items.map((it, j) => j === i ? { ...it, [field]: value } : it));
+  const removeActionItem = (i) => setActionItems(items => items.filter((_, j) => j !== i));
 
   const extract = async () => {
     if (!discussionNotes.trim()) { setErr('Add what was discussed first — there\'s nothing to draft from yet.'); return; }
@@ -86,6 +96,7 @@ function NewConnectForm({ onSaved }) {
         body: JSON.stringify({
           employee_id: employeeId, held_at: heldAt, duration_min: durationMin || null, topic, discussion_notes: discussionNotes,
           achievements, blockers, feedback, kra_ids: kraIds,
+          action_items: actionItems.filter(i => i.description.trim()).map(i => ({ description: i.description.trim(), due_date: i.due_date || null })),
         }),
       });
       onSaved();
@@ -112,6 +123,24 @@ function NewConnectForm({ onSaved }) {
         <label className="lbl">Topic (optional)</label>
         <input className="inp" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g. Mid-quarter check-in" />
       </div>
+      {employeeId && cadence && (
+        <div className="grid sm:grid-cols-3 gap-2 bg-navy-50 rounded-xl p-3 text-xs">
+          <div>
+            <p className="lbl mb-0.5">Connect Cadence</p>
+            <p className="font-semibold text-navy-700">Quarterly</p>
+            <p className="text-navy-400">Every {cadence.cadence_days} days · {cadence.expected_total} expected this cycle</p>
+          </div>
+          <div>
+            <p className="lbl mb-0.5">Progress this cycle</p>
+            <p className={`font-semibold ${cadence.on_track ? 'text-emerald-700' : 'text-amber-700'}`}>{cadence.logged_count} of {cadence.expected_so_far} expected so far</p>
+            <p className="text-navy-400">{cadence.on_track ? 'On track' : 'Behind'}</p>
+          </div>
+          <div>
+            <p className="lbl mb-0.5">Next due</p>
+            <p className="font-semibold text-navy-700">{new Date(cadence.next_due).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+          </div>
+        </div>
+      )}
       {employeeId && kraOptions.length > 0 && (
         <div>
           <label className="lbl">Link to KRA(s)</label>
@@ -148,6 +177,22 @@ function NewConnectForm({ onSaved }) {
         </div>
       </div>
       <p className="text-[11px] text-navy-400">These are drafted from "What was discussed?" above — review and edit before saving; nothing here is final until you save.</p>
+      <div>
+        <div className="flex items-center justify-between">
+          <label className="lbl mb-0">Action items</label>
+          <button type="button" className="text-xs font-semibold text-brand-600" onClick={addActionItem}>+ Add</button>
+        </div>
+        <div className="space-y-1.5 mt-1.5">
+          {actionItems.map((item, i) => (
+            <div key={i} className="flex gap-1.5 items-center">
+              <input className="inp flex-1" placeholder="Action item…" value={item.description} onChange={e => updateActionItem(i, 'description', e.target.value)} />
+              <input className="inp w-36" type="date" value={item.due_date} onChange={e => updateActionItem(i, 'due_date', e.target.value)} />
+              <button type="button" className="btn-sec !p-1.5" onClick={() => removeActionItem(i)}><Trash2 size={13} /></button>
+            </div>
+          ))}
+          {!actionItems.length && <p className="text-xs text-navy-400">No action items yet.</p>}
+        </div>
+      </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
       <button className="btn-pri" onClick={save}>Save connect</button>
     </div>
@@ -169,6 +214,10 @@ function ConnectRow({ cn, reload }) {
     try { const r = await api('/agentic/connect-insights', { method: 'POST', body: JSON.stringify({ employee_id: cn.employee_id }) }); setInsight(r); }
     catch (e) { setErr(e.message); }
     setBusy(false);
+  };
+  const toggleActionItem = async (item) => {
+    try { await api(`/pms/connects/${cn.id}/action-items/${item.id}`, { method: 'PUT', body: JSON.stringify({ done: !item.done }) }); reload(); }
+    catch (e) { setErr(e.message); }
   };
 
   return (
@@ -195,6 +244,18 @@ function ConnectRow({ cn, reload }) {
       </div>
       {Array.isArray(cn.kra_ids) && cn.kra_ids.length > 0 && (
         <p className="text-[11px] text-navy-400">Linked to {cn.kra_ids.length} KRA{cn.kra_ids.length === 1 ? '' : 's'}</p>
+      )}
+      {Array.isArray(cn.action_items) && cn.action_items.length > 0 && (
+        <div className="space-y-1">
+          <p className="lbl mb-0.5">Action items</p>
+          {cn.action_items.map(item => (
+            <label key={item.id} className="flex items-center gap-2 text-xs text-navy-600">
+              <input type="checkbox" checked={item.done} onChange={() => toggleActionItem(item)} />
+              <span className={item.done ? 'line-through text-navy-400' : ''}>{item.description}</span>
+              {item.due_date && <span className="text-navy-400">· due {new Date(item.due_date).toLocaleDateString()}</span>}
+            </label>
+          ))}
+        </div>
       )}
       <div className="flex gap-2">
         {!cn.signed_off && <button className="btn-sec" onClick={signOff}>Sign off</button>}

@@ -18,7 +18,7 @@ const { apiPermissionParity, hasPermission } = require('../../core/permissions')
 const { notify } = require('../../core/notifications');
 const { requireConsent } = require('../../core/consent');
 const { isSuper50Eligible, computeWeightedRating } = require('./rating-rules');
-const { isConnectDue, shouldRemindAgain } = require('./connect-reminders');
+const { isConnectDue, shouldRemindAgain, computeCadenceProgress } = require('./connect-reminders');
 const { parseCsv, parseExcelBuffer, detectFormat } = require('../../core/employees');
 const pm = require('./phase-machine');
 
@@ -1384,17 +1384,36 @@ router.post('/connects', async (req, res) => {
     // the manager logs what was actually discussed, and achievements/
     // blockers/feedback are meant to be DERIVED from it (via
     // /agentic/connect-extract) rather than typed from scratch.
-    const { employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based } = req.body || {};
+    // action_items (migration 018): optional list built up in the form
+    // before saving, inserted in the same transaction as the connect
+    // itself so a partial save (connect with no items, or items with no
+    // connect) can't happen.
+    const { employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based, action_items } = req.body || {};
     if (!employee_id || !held_at) return res.status(400).json({ error: 'employee_id and held_at required' });
     if (meeting_based) await requireConsent(T(req), employee_id);
-    await db.query(
-      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::uuid[],'{}'::uuid[]),$13)`,
-      [T(req), req.user.id, employee_id, held_at, duration_min != null ? Number(duration_min) : null, topic || null, discussion_notes || null,
-        notes || null, achievements || null, blockers || null, feedback || null,
-        Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based]);
-    audit(req, 'CONNECT_LOGGED', null, employee_id, { held_at });
-    res.json({ ok: true });
+    const items = Array.isArray(action_items) ? action_items.filter((i) => i && String(i.description || '').trim()) : [];
+
+    const client = await db.getClient();
+    let connectId;
+    try {
+      await client.query('BEGIN');
+      const cn = (await client.query(
+        `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::uuid[],'{}'::uuid[]),$13) RETURNING id`,
+        [T(req), req.user.id, employee_id, held_at, duration_min != null ? Number(duration_min) : null, topic || null, discussion_notes || null,
+          notes || null, achievements || null, blockers || null, feedback || null,
+          Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based])).rows[0];
+      connectId = cn.id;
+      for (const item of items) {
+        await client.query(
+          `INSERT INTO pms.connect_action_items (tenant_id, connect_id, description, due_date) VALUES ($1,$2,$3,$4)`,
+          [T(req), connectId, String(item.description).trim(), item.due_date || null]);
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+
+    audit(req, 'CONNECT_LOGGED', null, employee_id, { held_at, action_items: items.length });
+    res.json({ ok: true, id: connectId });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -1402,12 +1421,61 @@ router.get('/connects', async (req, res) => {
   try {
     const mine = req.query.employee_id;
     const r = await db.query(
-      `SELECT cn.*, e.name AS employee_name, m.name AS manager_name
+      `SELECT cn.*, e.name AS employee_name, m.name AS manager_name,
+              COALESCE((SELECT json_agg(json_build_object('id', ai.id, 'description', ai.description, 'due_date', ai.due_date, 'done', ai.done) ORDER BY ai.created_at)
+                        FROM pms.connect_action_items ai WHERE ai.connect_id=cn.id), '[]') AS action_items
          FROM pms.connects cn JOIN core.employees e ON e.id=cn.employee_id JOIN core.employees m ON m.id=cn.manager_id
         WHERE cn.tenant_id=$1 AND (cn.employee_id=$2 OR cn.manager_id=$2) ${mine ? 'AND cn.employee_id=$3' : ''}
         ORDER BY cn.held_at DESC LIMIT 100`,
       mine ? [T(req), req.user.id, mine] : [T(req), req.user.id]);
     res.json({ connects: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Toggle one action item's done state — independent of the connect it
+// came from being signed off or not; a follow-up can still be ticked off
+// weeks later. Manager (who logged the connect) or admin only, same
+// scoping as sign-off.
+router.put('/connects/:id/action-items/:itemId', async (req, res) => {
+  try {
+    const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!cn) return res.status(404).json({ error: 'connect not found' });
+    if (cn.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your connect' });
+    const { done } = req.body || {};
+    const r = await db.query(
+      `UPDATE pms.connect_action_items SET done=$1 WHERE id=$2 AND connect_id=$3 RETURNING id`,
+      [!!done, req.params.itemId, cn.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'action item not found on this connect' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Fix guide item #8 follow-up: the "Connect Cadence / Progress this
+// cycle / Next due" header from the reference screenshot. Cadence is
+// fixed at 90 days (matching connect-reminders.js's own default —
+// "Quarterly"), applied against the active cycle's date range (falls
+// back to a full year if the cycle has no opens_at/closes_at set).
+router.get('/connects/cadence/:employeeId', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const c = await activeCycle(T(req));
+    const cycleStart = c && c.opens_at ? new Date(c.opens_at) : null;
+    const cycleEnd = c && c.closes_at ? new Date(c.closes_at) : null;
+
+    const rangeParams = cycleStart && cycleEnd ? [T(req), req.params.employeeId, c.opens_at, c.closes_at] : [T(req), req.params.employeeId];
+    const rangeClause = cycleStart && cycleEnd ? 'AND held_at BETWEEN $3 AND $4' : '';
+    const loggedRow = (await db.query(
+      `SELECT COUNT(*)::int AS n, MAX(held_at) AS last_held_at FROM pms.connects WHERE tenant_id=$1 AND employee_id=$2 ${rangeClause}`,
+      rangeParams)).rows[0];
+
+    const result = computeCadenceProgress({
+      cycleStart, cycleEnd, today: new Date(), loggedCount: loggedRow.n,
+      lastHeldAt: loggedRow.last_held_at ? new Date(loggedRow.last_held_at) : null,
+    });
+    res.json({ ...result, next_due: result.next_due.toISOString().slice(0, 10) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

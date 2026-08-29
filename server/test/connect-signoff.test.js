@@ -123,3 +123,58 @@ test('connect: duration, topic, and discussion notes round-trip through create a
   assert.equal(cn.blockers, 'Waiting on legal sign-off');
   assert.equal(cn.feedback, 'Keep pushing on the timeline');
 });
+
+// Requested with the same reference screenshot: a "+ Add" action-items
+// list built up while logging the connect (migration 018).
+test('connect: action items are saved with the connect and can be toggled done independently', { skip }, async () => {
+  const mgrAuth = await login('so-mgr@x.com');
+  const created = await api('/pms/connects', mgrAuth.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      employee_id: empId, held_at: '2026-11-15', topic: 'Action items test',
+      action_items: [{ description: 'Follow up with legal', due_date: '2026-11-22' }, { description: 'Share timeline doc' }],
+    }),
+  });
+  assert.equal(created.status, 200);
+  assert.ok(created.body.id, 'create response includes the new connect id');
+
+  const list = await api('/pms/connects', mgrAuth.token);
+  const cn = list.body.connects.find((c) => c.topic === 'Action items test');
+  assert.equal(cn.action_items.length, 2);
+  assert.equal(cn.action_items[0].description, 'Follow up with legal');
+  assert.equal(cn.action_items[0].due_date, '2026-11-22');
+  assert.equal(cn.action_items[0].done, false);
+
+  const toggle = await api(`/pms/connects/${cn.id}/action-items/${cn.action_items[0].id}`, mgrAuth.token, {
+    method: 'PUT', body: JSON.stringify({ done: true }),
+  });
+  assert.equal(toggle.status, 200);
+
+  const list2 = await api('/pms/connects', mgrAuth.token);
+  const cn2 = list2.body.connects.find((c) => c.topic === 'Action items test');
+  assert.equal(cn2.action_items[0].done, true, 'toggled item stays done');
+  assert.equal(cn2.action_items[1].done, false, 'the other item is untouched');
+
+  // An unrelated manager cannot toggle someone else's connect's action item.
+  const strangerAuth = await login('so-stranger@x.com');
+  const blocked = await api(`/pms/connects/${cn.id}/action-items/${cn.action_items[1].id}`, strangerAuth.token, {
+    method: 'PUT', body: JSON.stringify({ done: true }),
+  });
+  assert.equal(blocked.status, 403);
+});
+
+// Requested alongside action items: the "Connect Cadence / Progress this
+// cycle / Next due" header, backed by GET /connects/cadence/:employeeId.
+test('connect cadence: computes expected/logged/next-due for a specific report, blocks an unrelated manager', { skip }, async () => {
+  const mgrAuth = await login('so-mgr@x.com');
+  const strangerAuth = await login('so-stranger@x.com');
+
+  const r = await api(`/pms/connects/cadence/${empId}`, mgrAuth.token);
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.body.expected_total, 'number');
+  assert.equal(typeof r.body.logged_count, 'number');
+  assert.ok(r.body.next_due);
+
+  const blocked = await api(`/pms/connects/cadence/${empId}`, strangerAuth.token);
+  assert.equal(blocked.status, 403);
+});
