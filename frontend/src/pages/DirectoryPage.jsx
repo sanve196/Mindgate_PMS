@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment } from 'react';
-import { Settings2 } from 'lucide-react';
+import { Settings2, Trash2 } from 'lucide-react';
 import { api } from '../utils/api';
 
 const ROLES = ['employee', 'manager', 'hod', 'hr', 'admin'];
@@ -18,6 +18,20 @@ export default function DirectoryPage() {
     const fd = new FormData(); fd.append('file', file);
     try { setReport(await api(`/employees/import${commit ? '?commit=1' : ''}`, { method: 'POST', body: fd })); if (commit) load(); }
     catch (e) { setErr(e.message); setReport(e.data && e.data.errors ? e.data : null); }
+  };
+
+  // Row-level Delete — a single native confirm() dialog is the friction
+  // here, not a typed-name confirmation. The backend delete route is
+  // itself transaction-wrapped and audit-logged (see core/employees.js's
+  // DELETE handler), so the safety net for "did I really mean to do
+  // this" lives at the human-decision moment, not by adding
+  // finger-gymnastics on top.
+  const quickDelete = async (r) => {
+    setErr(null);
+    const msg = `Permanently delete ${r.name} (${r.email})?\n\nIf they managed anyone, those reports' own KRAs and appraisals are preserved — only the specific manager-side review records that literally require a manager reference will be removed with them. This cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    try { await api(`/employees/${r.id}`, { method: 'DELETE' }); load(); }
+    catch (e) { setErr(e.message); }
   };
 
   return (
@@ -45,8 +59,9 @@ export default function DirectoryPage() {
         <div className="card overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
-              <tr><th className="text-left px-3 py-2">Name</th><th className="text-left px-3 py-2">Email</th>
-                <th className="text-left px-3 py-2">Department</th><th className="text-left px-3 py-2">Manager</th>
+              <tr><th className="text-left px-3 py-2">Employee ID</th><th className="text-left px-3 py-2">Name</th>
+                <th className="text-left px-3 py-2">Email</th>
+                <th className="text-left px-3 py-2">Department</th><th className="text-left px-3 py-2">Manager's Email</th>
                 <th className="text-left px-3 py-2">Status</th><th className="text-left px-3 py-2">Login</th>
                 <th className="text-left px-3 py-2">Role</th><th className="px-3 py-2" /></tr>
             </thead>
@@ -54,21 +69,29 @@ export default function DirectoryPage() {
               {rows.map(r => (
                 <Fragment key={r.id}>
                   <tr>
+                    <td className="px-3 py-2 font-mono text-navy-500">{r.emp_code || '—'}</td>
                     <td className="px-3 py-2 font-semibold">{r.name}</td><td className="px-3 py-2">{r.email}</td>
                     <td className="px-3 py-2">{r.department || '—'}</td>
-                    <td className="px-3 py-2">{r.manager_name || '—'}</td><td className="px-3 py-2">{r.status}</td>
+                    <td className="px-3 py-2">{r.manager_email || '—'}</td><td className="px-3 py-2">{r.status}</td>
                     <td className="px-3 py-2">
                       <span className={`chip ${r.has_login ? 'bg-leaf-50 text-leaf-600' : 'bg-navy-50 text-navy-500'}`}>{r.has_login ? 'Active' : 'None yet'}</span>
                     </td>
                     <td className="px-3 py-2 capitalize">{r.role}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button className="btn-sec !py-1" onClick={() => setOpenId(v => v === r.id ? null : r.id)}>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <button className="btn-sec !py-1 mr-1" onClick={() => setOpenId(v => v === r.id ? null : r.id)}>
                         <Settings2 size={12} className="inline mr-1" />Manage
+                      </button>
+                      <button
+                        className="btn !py-1 text-white bg-rose-600 hover:bg-rose-700"
+                        onClick={() => quickDelete(r)}
+                        title={`Delete ${r.name}`}
+                      >
+                        <Trash2 size={12} className="inline mr-1" />Delete
                       </button>
                     </td>
                   </tr>
                   {openId === r.id && (
-                    <tr><td colSpan={8} className="px-3 pb-3 bg-navy-50/50"><EmployeePanel employee={r} onDone={() => { setOpenId(null); load(); }} /></td></tr>
+                    <tr><td colSpan={9} className="px-3 pb-3 bg-navy-50/50"><EmployeePanel employee={r} onDone={() => { setOpenId(null); load(); }} /></td></tr>
                   )}
                 </Fragment>
               ))}
@@ -121,19 +144,6 @@ function EmployeePanel({ employee, onDone }) {
     catch (e) { setAccessErr(e.message); }
   };
 
-  // ---- Delete (destructive — requires typing the name to confirm) ----
-  const [confirmText, setConfirmText] = useState('');
-  const [deleteErr, setDeleteErr] = useState(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const doDelete = async () => {
-    setDeleteErr(null);
-    if (confirmText.trim() !== employee.name) { setDeleteErr(`Type "${employee.name}" exactly to confirm.`); return; }
-    setDeleting(true);
-    try { await api(`/employees/${employee.id}`, { method: 'DELETE' }); onDone(); }
-    catch (e) { setDeleteErr(e.message); setDeleting(false); }
-  };
-
   return (
     <div className="p-3 space-y-4 text-xs">
       <div className="space-y-2">
@@ -180,25 +190,6 @@ function EmployeePanel({ employee, onDone }) {
         </div>
         {accessErr && <p className="text-rose-600">{accessErr}</p>}
         {accessMsg && <p className="text-leaf-600">{accessMsg}</p>}
-      </div>
-
-      <div className="space-y-2 pt-3 border-t border-navy-100">
-        <p className="lbl text-rose-500">Delete employee — permanent</p>
-        <p className="text-[11px] text-navy-400">
-          Removes {employee.name} and everything that is fundamentally theirs (KRAs, self-appraisals, connects,
-          rating history, login, etc). If they managed anyone, those reports' own records are kept — only the
-          specific review rows that required a manager reference are removed with them. This cannot be undone.
-        </p>
-        <div className="flex flex-wrap items-end gap-2">
-          <div>
-            <label className="lbl">Type "{employee.name}" to confirm</label>
-            <input className="inp w-56" value={confirmText} onChange={e => setConfirmText(e.target.value)} />
-          </div>
-          <button className="btn text-white bg-rose-600 hover:bg-rose-700" disabled={deleting} onClick={doDelete}>
-            {deleting ? 'Deleting…' : 'Delete permanently'}
-          </button>
-        </div>
-        {deleteErr && <p className="text-rose-600">{deleteErr}</p>}
       </div>
     </div>
   );
