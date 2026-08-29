@@ -45,7 +45,7 @@ const NAV = [
   { group: 'HR Admin', items: [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
-    { to: '/admin/directory', label: 'Employees', icon: Upload },
+    { to: '/admin/directory', label: 'Employees', icon: Upload, roles: ['admin', 'hr'] },
     { to: '/admin/kra-overview', label: 'KRA Overview', icon: ClipboardList },
     { to: '/admin/closure-letters', label: 'Closure Letters', icon: FileText },
     { to: '/admin/watchlist', label: 'Super 50', icon: Award },
@@ -84,17 +84,29 @@ export default function App() {
             </div>
           </div>
           <nav className="px-2 pb-4 flex lg:block overflow-x-auto gap-1">
-            {NAV.map(g => (
-              <div key={g.group} className="lg:mb-3 flex lg:block gap-1">
-                <p className="hidden lg:block px-2 text-[10px] font-bold text-navy-400 uppercase tracking-wide mb-1">{g.group}</p>
-                {g.items.map(it => (
-                  <NavLink key={it.to} to={it.to}
-                    className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-xl text-sm whitespace-nowrap transition-colors ${isActive ? 'bg-brand-500 text-white shadow-card' : 'text-navy-600 hover:bg-white/70'}`}>
-                    <it.icon size={14} />{it.label}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
+            {NAV.map(g => {
+              // A nav item's `roles` array is opt-in — items without one stay
+              // visible to everyone (the current behaviour for every item
+              // other than the ones explicitly locked down). Items whose
+              // `roles` list doesn't include the current user's role get
+              // filtered out here. If a whole group ends up empty after
+              // filtering, drop the group heading too — showing an empty
+              // "HR Admin" band with nothing under it would just be visually
+              // confusing.
+              const visibleItems = g.items.filter(it => !it.roles || it.roles.includes(user.role));
+              if (visibleItems.length === 0) return null;
+              return (
+                <div key={g.group} className="lg:mb-3 flex lg:block gap-1">
+                  <p className="hidden lg:block px-2 text-[10px] font-bold text-navy-400 uppercase tracking-wide mb-1">{g.group}</p>
+                  {visibleItems.map(it => (
+                    <NavLink key={it.to} to={it.to}
+                      className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-xl text-sm whitespace-nowrap transition-colors ${isActive ? 'bg-brand-500 text-white shadow-card' : 'text-navy-600 hover:bg-white/70'}`}>
+                      <it.icon size={14} />{it.label}
+                    </NavLink>
+                  ))}
+                </div>
+              );
+            })}
           </nav>
           <div className="hidden lg:block px-4 py-3 border-t border-navy-100/60 text-xs text-navy-500">
             {user.name} · {user.role}
@@ -118,7 +130,7 @@ export default function App() {
             <Route path="/pip" element={<PIPPage />} />
             <Route path="/admin/cycles" element={<CycleAdminPage />} />
             <Route path="/admin/calibration" element={<CalibrationPage />} />
-            <Route path="/admin/directory" element={<DirectoryPage />} />
+            <Route path="/admin/directory" element={<RequireRole user={user} roles={['admin', 'hr']}><DirectoryPage /></RequireRole>} />
             <Route path="/admin/kra-overview" element={<KraOrgOverviewPage />} />
             <Route path="/admin/closure-letters" element={<ClosureLettersPage />} />
             <Route path="/admin/watchlist" element={<WatchlistPage />} />
@@ -139,6 +151,25 @@ export default function App() {
 // doesn't. Once an account exists, /setup/status permanently reports
 // false and everyone just sees the normal login form below — this is
 // not a standing "create account" screen, only a one-time first-run one.
+// Route-level role gate. Same allowed-roles model as the sidebar (opt-in
+// via a `roles` prop), so if the user URL-hops directly to /admin/directory
+// as a plain employee/manager, they get a friendly message rather than the
+// page loading, immediately failing on the 403 from GET /employees, and
+// looking broken. Not a security control on its own — that lives in the
+// API (see core/employees.js's `GET /` handler) — but the frontend equivalent
+// of it, so the two layers stay consistent.
+function RequireRole({ user, roles, children }) {
+  if (roles.includes(user.role)) return children;
+  return (
+    <div className="max-w-md mx-auto mt-16 text-center card p-6">
+      <h2 className="text-base font-bold text-navy-800 mb-2">Not available for your role</h2>
+      <p className="text-sm text-navy-500">
+        This page is only available to HR and admin roles. If you think you should have access, ask your admin to update your role from the Employees page.
+      </p>
+    </div>
+  );
+}
+
 function Login({ onUser }) {
   const [needsSetup, setNeedsSetup] = useState(null); // null = still checking
   useEffect(() => { api('/setup/status').then(r => setNeedsSetup(r.bootstrap_available)).catch(() => setNeedsSetup(false)); }, []);

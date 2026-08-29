@@ -302,6 +302,15 @@ router.get('/import-template.csv', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
+    // people_admin restricts this list to HR + admin roles (see
+    // migrations/002-default-permission-bundles.js — employee/manager/hod
+    // roles have people_view, which does not include this). Gating GET
+    // /employees separately at the API layer, not just hiding the nav
+    // item in the frontend, is the real security control — a determined
+    // non-HR user could otherwise call this endpoint directly (via curl,
+    // browser devtools, etc.) and dump the whole employee list even if
+    // the button is hidden from them in the UI.
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
     const r = await db.query(
       `SELECT e.id, e.emp_code, e.name, e.email, e.department, e.designation, e.role_band,
               e.status, e.date_of_joining, m.name AS manager_name, m.email AS manager_email,

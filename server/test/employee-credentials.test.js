@@ -70,6 +70,26 @@ test('employee list reflects has_login=false and role=employee before any provis
   assert.equal(row.role, 'employee');
 });
 
+test('GET /employees is 403 for a non-HR user even though authenticated — API-layer control, not just UI hiding', { skip }, async () => {
+  // Regression guard: this endpoint used to be reachable by any logged-in
+  // user, meaning a manager or plain employee could hit the API directly
+  // (curl, browser devtools) and dump the whole company employee list,
+  // even while the "Employees" nav item was hidden from them in the UI.
+  // The test proves the API itself now refuses.
+  const empAuth = await login('creds-hr@x.com');
+  // Give the plain employee a real password so they can actually log in
+  // and get a token to prove the endpoint refuses them AS AN AUTHENTICATED
+  // USER — not just because they weren't signed in.
+  await api(`/employees/${empId}/credentials`, empAuth.token, { method: 'POST', body: JSON.stringify({ password: 'employee-password-1' }) });
+  const r = await fetch(`${base}/auth/dev-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'creds-emp@x.com', password: 'employee-password-1' }) });
+  const { token: empToken, user } = await r.json();
+  assert.equal(user.role, 'employee', 'sanity check: the token really is for a plain employee');
+
+  const listAttempt = await api('/employees', empToken);
+  assert.equal(listAttempt.status, 403, 'plain employee gets 403, not the whole employee list');
+  assert.ok(/people_admin/.test(listAttempt.body.error), 'error message names the permission missing, not a generic denial');
+});
+
 test('HR can set a password for an employee, who can then log in with it', { skip }, async () => {
   const hrAuth = await login('creds-hr@x.com');
   const set = await api(`/employees/${empId}/credentials`, hrAuth.token, { method: 'POST', body: JSON.stringify({ password: 'a-real-password1' }) });
