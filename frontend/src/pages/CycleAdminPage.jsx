@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, ArrowRight, RotateCcw, Rocket, Activity, Sparkles, Trash2, Save } from 'lucide-react';
+import { Plus, ArrowRight, RotateCcw, Rocket, Activity, Sparkles, Trash2, Save, X, Info } from 'lucide-react';
 import { api, PHASES, phaseLabel, phaseColor, DraftBadge } from '../utils/api';
 
 export default function CycleAdminPage() {
@@ -10,14 +10,7 @@ export default function CycleAdminPage() {
   const load = () => api('/pms/cycles').then(r => setCycles(r.cycles)).catch(e => setErr(e.message));
   useEffect(() => { load(); }, []);
 
-  const create = async () => {
-    const name = prompt('Cycle name (e.g. FY26 Annual Appraisal)'); if (!name) return;
-    const fy = prompt('Fiscal year label (e.g. FY26)') || 'FY26';
-    const typeRaw = (prompt('Cycle type — type exactly "annual" or "midyear"', 'annual') || 'annual').trim().toLowerCase();
-    const cycle_type = typeRaw === 'midyear' ? 'midyear' : 'annual';
-    try { await api('/pms/cycles', { method: 'POST', body: JSON.stringify({ name, fiscal_year: fy, cycle_type }) }); load(); }
-    catch (e) { setErr(e.message); }
-  };
+  const [showNew, setShowNew] = useState(false);
   const phase = async (c, to, rollback) => {
     setErr(null);
     try { await api(`/pms/cycles/${c.id}/phase`, { method: 'POST', body: JSON.stringify({ to, rollback }) }); load(); }
@@ -56,7 +49,7 @@ export default function CycleAdminPage() {
     <div className="space-y-4 max-w-4xl mx-auto">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Appraisal Cycles</h2>
-        <button className="btn-pri" onClick={create}><Plus size={13} className="inline mr-1" />New cycle</button>
+        <button className="btn-pri" onClick={() => setShowNew(true)}><Plus size={13} className="inline mr-1" />New cycle</button>
         <button className="btn-sec" disabled={busy} onClick={cycleHealth}><Activity size={13} className="inline mr-1" />{busy ? 'Working…' : 'Cycle health (agent)'}</button>
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
@@ -97,6 +90,110 @@ export default function CycleAdminPage() {
       })}
       {!cycles.length && <div className="card p-8 text-center text-sm text-navy-400">No cycles yet. Create one to begin — it starts in Draft; advance to KRA Setting when ready.</div>}
       <ReviewParametersConfig />
+      {showNew && <NewCycleModal onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
+    </div>
+  );
+}
+
+// Replaces three sequential prompt() dialogs (browser popups, not part of
+// the page) with a proper in-page form, per a direct request with a
+// mockup. Note on the "Defaults applied" box: it shows the scale/bell
+// curve this app actually ships with (a numeric 1-5 scale) rather than
+// the mockup's illustrative A+/A/B+/B/C/D letter grades — switching the
+// whole rating system to letter grades would ripple through calibration,
+// 9-Box, and Super 50 (all built around 1-5 numbers) well beyond what was
+// asked here; flagged back to the requester rather than silently changed.
+function NewCycleModal({ onClose, onCreated }) {
+  const thisYear = new Date().getFullYear();
+  const defaultFY = `FY${String(thisYear).slice(-2)}-${String(thisYear + 1).slice(-2)}`;
+  const [fiscalYear, setFiscalYear] = useState(defaultFY);
+  const [cycleType, setCycleType] = useState('annual');
+  const [name, setName] = useState(`Annual Appraisal ${defaultFY}`);
+  const [nameTouched, setNameTouched] = useState(false);
+  const [description, setDescription] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+  const nextYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [startsAt, setStartsAt] = useState(today);
+  const [endsAt, setEndsAt] = useState(nextYear);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // Suggests a sensible cycle name from Fiscal Year + Type, but only
+  // until the person actually edits the name field themselves — matches
+  // the mockup's "Annual Appraisal FY26-27" auto-filled from the fields
+  // above it, without fighting a manual edit afterwards.
+  useEffect(() => {
+    if (nameTouched) return;
+    setName(`${cycleType === 'midyear' ? 'Mid-Year Review' : 'Annual Appraisal'} ${fiscalYear}`);
+  }, [fiscalYear, cycleType, nameTouched]);
+
+  const create = async () => {
+    if (!name.trim() || !fiscalYear.trim()) { setErr('Cycle name and fiscal year are required.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await api('/pms/cycles', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: name.trim(), fiscal_year: fiscalYear.trim(), cycle_type: cycleType,
+          description: description.trim() || null, opens_at: startsAt || null, closes_at: endsAt || null,
+        }),
+      });
+      onCreated();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-900/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-navy-100">
+          <p className="text-base font-bold">New PMS Cycle</p>
+          <button className="text-navy-400 hover:text-navy-600" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="lbl">Fiscal Year</label>
+              <input className="inp" value={fiscalYear} onChange={e => setFiscalYear(e.target.value)} placeholder="e.g. FY26-27" />
+            </div>
+            <div>
+              <label className="lbl">Type</label>
+              <select className="inp" value={cycleType} onChange={e => setCycleType(e.target.value)}>
+                <option value="annual">Annual</option>
+                <option value="midyear">Mid-Year</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="lbl">Cycle Name</label>
+            <input className="inp" value={name} onChange={e => { setName(e.target.value); setNameTouched(true); }} placeholder="e.g. Annual Appraisal FY26-27" />
+          </div>
+          <div>
+            <label className="lbl">Description (optional)</label>
+            <textarea className="inp" rows={2} value={description} onChange={e => setDescription(e.target.value)} placeholder="Brief note about this cycle" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="lbl">Starts</label>
+              <input className="inp" type="date" value={startsAt} onChange={e => setStartsAt(e.target.value)} />
+            </div>
+            <div>
+              <label className="lbl">Ends</label>
+              <input className="inp" type="date" value={endsAt} onChange={e => setEndsAt(e.target.value)} />
+            </div>
+          </div>
+          <div className="bg-navy-50 rounded-xl p-3 text-xs text-navy-500 space-y-1">
+            <p className="flex items-center gap-1.5 font-semibold text-navy-600"><Info size={13} />Defaults applied</p>
+            <p><b>Rating scale:</b> 1 Needs Improvement · 2 Developing · 3 Meets Expectations · 4 Exceeds · 5 Outstanding</p>
+            <p><b>Bell curve:</b> 1 – 5% · 2 – 15% · 3 – 55% · 4 – 20% · 5 – 5%</p>
+            <p className="text-navy-400">These can be adjusted after creation.</p>
+          </div>
+          {err && <p className="text-xs text-rose-600">{err}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-navy-100">
+          <button className="btn-sec" onClick={onClose}>Cancel</button>
+          <button className="btn-pri" disabled={busy} onClick={create}>{busy ? 'Creating…' : 'Create cycle'}</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -66,15 +66,15 @@ router.get('/cycles', async (req, res) => {
 router.post('/cycles', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
-    const { name, fiscal_year, cycle_type, rating_scale, bell_curve, opens_at, closes_at, pip_threshold } = req.body || {};
+    const { name, fiscal_year, cycle_type, description, rating_scale, bell_curve, opens_at, closes_at, pip_threshold } = req.body || {};
     if (!name || !fiscal_year) return res.status(400).json({ error: 'name and fiscal_year required' });
     const r = await db.query(
-      `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, rating_scale, bell_curve, opens_at, closes_at, pip_threshold, created_by)
-       VALUES ($1,$2,$3,COALESCE($4,'annual'),COALESCE($5,DEFAULT),COALESCE($6,DEFAULT),$7,$8,COALESCE($9,DEFAULT),$10) RETURNING *`
-        .replace('COALESCE($5,DEFAULT)', `COALESCE($5, '[{"value":1,"label":"Needs Improvement"},{"value":2,"label":"Developing"},{"value":3,"label":"Meets Expectations"},{"value":4,"label":"Exceeds"},{"value":5,"label":"Outstanding"}]'::jsonb)`)
-        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '{"1":5,"2":15,"3":55,"4":20,"5":5}'::jsonb)`)
-        .replace('COALESCE($9,DEFAULT)', `COALESCE($9, 3.0)`),
-      [T(req), name, fiscal_year, cycle_type || null, rating_scale ? JSON.stringify(rating_scale) : null,
+      `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, description, rating_scale, bell_curve, opens_at, closes_at, pip_threshold, created_by)
+       VALUES ($1,$2,$3,COALESCE($4,'annual'),$5,COALESCE($6,DEFAULT),COALESCE($7,DEFAULT),$8,$9,COALESCE($10,DEFAULT),$11) RETURNING *`
+        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '[{"value":1,"label":"Needs Improvement"},{"value":2,"label":"Developing"},{"value":3,"label":"Meets Expectations"},{"value":4,"label":"Exceeds"},{"value":5,"label":"Outstanding"}]'::jsonb)`)
+        .replace('COALESCE($7,DEFAULT)', `COALESCE($7, '{"1":5,"2":15,"3":55,"4":20,"5":5}'::jsonb)`)
+        .replace('COALESCE($10,DEFAULT)', `COALESCE($10, 3.0)`),
+      [T(req), name, fiscal_year, cycle_type || null, description || null, rating_scale ? JSON.stringify(rating_scale) : null,
        bell_curve ? JSON.stringify(bell_curve) : null, opens_at || null, closes_at || null, pip_threshold ?? null, req.user.email]);
     audit(req, 'CYCLE_CREATED', r.rows[0].id, null, { name, fiscal_year });
     res.json({ ok: true, cycle: r.rows[0] });
