@@ -14,6 +14,45 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 29-Aug-2026: **HR-provisioned login credentials + role assignment
+  built.** Asked directly whether creating users "through the
+  application" was OK — the honest answer was no: beyond the one-time
+  bootstrap-admin (core/setup.js, now permanently locked) and CSV/Excel
+  import (creates employee PROFILE rows only, no password at all), there
+  was genuinely no way to give anyone else a real login. Real production
+  auth is meant to be the client's SSO/IdP (core/auth.js's own comments),
+  never actually built — until it is, this is the supported path.
+  New POST /employees/:id/credentials (people_admin-only) — HR sets a
+  password directly on an existing employee's behalf (a deliberate,
+  documented exception to the "only the account holder chooses their own
+  password" principle used everywhere else, e.g. bootstrap-admin —
+  acceptable only because there is no working self-service alternative
+  at all right now). New PUT /employees/:id/role (people_admin-only) —
+  assigns one of the 5 existing permission bundles (employee/manager/hod/
+  hr/admin); setting back to 'employee' deletes the core.user_roles row
+  entirely rather than storing a redundant explicit default.
+  GET /employees now also returns has_login and role per employee (a
+  LEFT JOIN against core.local_credentials/core.user_roles), so the
+  Employees page can show who can actually sign in.
+  Frontend: DirectoryPage.jsx gained a "Manage access" expandable row per
+  employee — set password, change role. HIT AND FIXED THE SAME REACT BUG
+  AGAIN mid-build: a shorthand `<>` fragment inside .map() can't take a
+  key, and I'd made this exact mistake once already this session in
+  KraOrgOverviewPage.jsx — caught it this time via inspection before it
+  ever reached a screenshot, fixed with Fragment+key the same way.
+  VERIFIED LIVE end-to-end against real Postgres, not just via the test
+  suite: HR set a real password for the existing emp@test.com test user,
+  that employee immediately logged in directly with it (role: employee),
+  HR then promoted them to manager, and their very next login correctly
+  reflected role: manager — the actual multi-step real-world flow, not
+  simulated.
+  test/employee-credentials.test.js: 4 integration tests. Hit a test bug
+  of my own while writing it (the shared login() helper hardcodes
+  password 'pass', but one test had already changed that specific user's
+  real password — diagnosed and fixed by logging in with the actual
+  current password instead, not by weakening the assertion).
+  117/117 backend tests pass (53/117, 64 skipped, without DB); clean
+  production build.
 - 28-Aug-2026: **Fixed "Not Found" on refresh/direct URL load in
   production** — flagged from a live deploy (refreshing e.g. /admin/cycles
   gave "Not Found"). Root cause: React Router's client-side routing only

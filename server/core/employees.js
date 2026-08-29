@@ -21,6 +21,7 @@
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
+const bcrypt = require('bcryptjs');
 const db = require('./db');
 const logger = require('./logger');
 const { authenticate } = require('./auth');
@@ -286,11 +287,68 @@ router.get('/', async (req, res) => {
   try {
     const r = await db.query(
       `SELECT e.id, e.emp_code, e.name, e.email, e.department, e.designation, e.role_band,
-              e.status, e.date_of_joining, m.name AS manager_name, m.email AS manager_email
+              e.status, e.date_of_joining, m.name AS manager_name, m.email AS manager_email,
+              (lc.email IS NOT NULL) AS has_login, COALESCE(ur.role, 'employee') AS role
          FROM core.employees e LEFT JOIN core.employees m ON m.id = e.manager_id
+         LEFT JOIN core.local_credentials lc ON lc.tenant_id = e.tenant_id AND LOWER(lc.email) = LOWER(e.email)
+         LEFT JOIN core.user_roles ur ON ur.tenant_id = e.tenant_id AND LOWER(ur.email) = LOWER(e.email)
         WHERE e.tenant_id = $1 ORDER BY e.name`, [req.user.tenant_id]);
     res.json({ employees: r.rows });
   } catch (e) { logger.error('employees list', { error: e.message }); res.status(500).json({ error: e.message }); }
+});
+
+// HR-provisioned login access — the ONLY way, right now, for anyone other
+// than the original one-time bootstrap admin to get a real login. Real
+// production auth is meant to be the client's SSO/IdP (core/auth.js's own
+// comments), which was never actually built — until it is, HR provisioning
+// a password directly is the supported path for standing up additional
+// test/real users, not open self-service signup. HR chooses the password
+// here on the employee's behalf (this is a deliberate exception to the
+// "never let anyone but the account holder choose their own password"
+// principle used everywhere else in this app, e.g. core/setup.js's
+// bootstrap-admin) — acceptable for now because there is no working
+// self-service alternative at all; whoever receives this password should
+// change it once real SSO exists.
+router.post('/:employeeId/credentials', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const { password } = req.body || {};
+    if (!password || password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
+    const emp = (await db.query(`SELECT email FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, req.user.tenant_id])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    const hash = await bcrypt.hash(password, 10);
+    await db.query(
+      `INSERT INTO core.local_credentials (tenant_id, email, password_hash) VALUES ($1,$2,$3)
+       ON CONFLICT (tenant_id, email) DO UPDATE SET password_hash=EXCLUDED.password_hash`,
+      [req.user.tenant_id, emp.email.toLowerCase(), hash]);
+    logger.info('employee credentials set', { tenantId: req.user.tenant_id, email: emp.email, by: req.user.email });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Assigns which permission bundle an employee's login uses (employee /
+// manager / hod / hr / admin — see migrations/002-default-permission-
+// bundles.js). Absence of a row here defaults to 'employee' already
+// (core/auth.js's principalByEmail), so this route only needs to handle
+// setting a non-default role, plus clearing back to the default.
+router.put('/:employeeId/role', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const { role } = req.body || {};
+    const VALID = ['employee', 'manager', 'hod', 'hr', 'admin'];
+    if (!VALID.includes(role)) return res.status(400).json({ error: `role must be one of: ${VALID.join(', ')}` });
+    const emp = (await db.query(`SELECT email FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, req.user.tenant_id])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (role === 'employee') {
+      await db.query(`DELETE FROM core.user_roles WHERE tenant_id=$1 AND LOWER(email)=LOWER($2)`, [req.user.tenant_id, emp.email]);
+    } else {
+      await db.query(
+        `INSERT INTO core.user_roles (tenant_id, email, role) VALUES ($1,$2,$3)
+         ON CONFLICT (tenant_id, email) DO UPDATE SET role=EXCLUDED.role`,
+        [req.user.tenant_id, emp.email.toLowerCase(), role]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /employees/import  (multipart file, .csv/.xlsx/.xls) ?commit=1 to load; default DRY RUN.
