@@ -401,6 +401,27 @@ function validateKraBulkRows(rows, knownEmails) {
   };
 }
 
+// GET /pms/hr/kra-sheet/bulk-upload-template.csv — same reasoning as the
+// employee import template: a real "Download template" link instead of
+// asking HR to guess the expected columns. Header matches
+// KRA_BULK_KNOWN exactly; example rows show two KRAs for one employee
+// whose weights sum to 100, since that grouping rule is the least
+// obvious part of the format — remove the example rows before uploading.
+router.get('/hr/kra-sheet/bulk-upload-template.csv', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const rows = [
+      KRA_BULK_KNOWN.join(','),
+      ['jane.sample@example.com', 'Improve client response time to <24hrs', '60', 'Own first-response SLA for assigned accounts', 'Avg response time tracked in helpdesk'].join(','),
+      ['jane.sample@example.com', 'Complete onboarding automation project', '40', 'Reduce manual setup steps for new joiners', 'Onboarding checklist automated in HRMS'].join(','),
+    ];
+    const csv = rows.join('\n') + '\n';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="kra_bulk_upload_template.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 const kraUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },

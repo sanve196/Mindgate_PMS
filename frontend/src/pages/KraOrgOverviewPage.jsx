@@ -1,6 +1,6 @@
 import { useEffect, useState, Fragment } from 'react';
 import { Search, UserCog, Plus, Trash2, Send } from 'lucide-react';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 
 const STATUS_COLOR = {
   not_started: 'bg-navy-50 text-navy-500',
@@ -50,11 +50,12 @@ export default function KraOrgOverviewPage() {
       <div className="card p-4 space-y-2">
         <p className="lbl">Bulk KRA upload — CSV or Excel (.xlsx), one row per KRA, dry run first (BR-1.1)</p>
         <div className="flex flex-wrap items-center gap-2">
+          <a className="btn-sec" href={`${API_BASE}/pms/hr/kra-sheet/bulk-upload-template.csv?token=${localStorage.getItem('apms_token')}`}>Download template</a>
           <input type="file" accept=".csv,.xlsx,.xls" onChange={e => { setKraFile(e.target.files[0]); setKraReport(null); }} className="text-xs" />
           <button className="btn-sec" disabled={!kraFile} onClick={() => sendKraBulk(false)}>Validate</button>
           <button className="btn-pri" disabled={!kraFile || !(kraReport && kraReport.ok && !kraReport.committed)} onClick={() => sendKraBulk(true)}>Commit load</button>
         </div>
-        <p className="text-[11px] text-navy-400">Columns: employee_email, kra_title, weight, description, measures. Each employee's weights must total 100. Loaded KRAs land as Draft — the employee (or HR) still needs to Submit.</p>
+        <p className="text-[11px] text-navy-400">Columns: employee_email, kra_title, weight, description, measures. Each employee's weights must total 100. Loaded KRAs land as Draft — the employee (or HR) still needs to Submit. The template includes two example rows for a sample employee — delete them before uploading your real data.</p>
         {kraErr && <p className="text-xs text-rose-600">{kraErr}</p>}
         {kraReport && (
           <div className="text-xs space-y-1">

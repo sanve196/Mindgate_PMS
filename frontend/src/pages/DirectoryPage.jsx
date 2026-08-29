@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, Fragment } from 'react';
 import { Settings2, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react';
-import { api } from '../utils/api';
+import { api, API_BASE } from '../utils/api';
 
 const ROLES = ['employee', 'manager', 'hod', 'hr', 'admin'];
 
@@ -111,11 +111,12 @@ export default function DirectoryPage() {
       <div className="card p-4 space-y-2">
         <p className="lbl">Bulk import — CSV or Excel (.xlsx), synced from your HRMS, dry run first</p>
         <div className="flex flex-wrap items-center gap-2">
+          <a className="btn-sec" href={`${API_BASE}/employees/import-template.csv?token=${localStorage.getItem('apms_token')}`}>Download template</a>
           <input type="file" accept=".csv,.xlsx,.xls" onChange={e => { setFile(e.target.files[0]); setReport(null); }} className="text-xs" />
           <button className="btn-sec" disabled={!file} onClick={() => send(false)}>Validate</button>
           <button className="btn-pri" disabled={!file || !(report && report.ok && !report.committed)} onClick={() => send(true)}>Commit load</button>
         </div>
-        <p className="text-[11px] text-navy-400">Legacy .xls files aren't supported — save as .xlsx first (File → Save As → Excel Workbook).</p>
+        <p className="text-[11px] text-navy-400">Legacy .xls files aren't supported — save as .xlsx first (File → Save As → Excel Workbook). The template includes one example row — delete it before uploading your real data.</p>
         {err && <p className="text-xs text-rose-600">{err}</p>}
         {report && (
           <div className="text-xs space-y-1">

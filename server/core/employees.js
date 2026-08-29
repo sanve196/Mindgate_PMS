@@ -283,6 +283,23 @@ const upload = multer({
 const router = express.Router();
 router.use(authenticate, apiPermissionParity);
 
+// GET /employees/import-template.csv — download link for the bulk import
+// form. Found missing during QA (no way to see the expected columns
+// without guessing). Header row matches KNOWN exactly so this can never
+// drift out of sync with what the importer actually accepts, plus one
+// clearly-labelled example row to show the expected shape — remove it
+// before uploading real data.
+router.get('/import-template.csv', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const example = ['E1001', 'Jane Sample', 'jane.sample@example.com', 'Engineering', 'Software Engineer', 'G5', '', '2024-01-15', 'active'];
+    const csv = [KNOWN.join(','), example.join(',')].join('\n') + '\n';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="employee_import_template.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/', async (req, res) => {
   try {
     const r = await db.query(
