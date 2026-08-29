@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Plus, CheckCircle2, Clock, Sparkles, Trash2 } from 'lucide-react';
-import { api, DraftBadge } from '../utils/api';
+import { Plus, CheckCircle2, Clock, Sparkles } from 'lucide-react';
+import { api } from '../utils/api';
 
 export default function ConnectsPage() {
   const [data, setData] = useState(null);
@@ -36,28 +36,25 @@ export default function ConnectsPage() {
 function NewConnectForm({ onSaved }) {
   const [employeeId, setEmployeeId] = useState('');
   const [heldAt, setHeldAt] = useState(new Date().toISOString().slice(0, 10));
-  // Requested: manager logs Date, Duration, Topic, and what was actually
-  // discussed — and Achievements/Blockers/Feedback are DERIVED from that
-  // discussion (via /agentic/connect-extract) rather than typed separately
-  // from scratch as three unrelated boxes.
   const [durationMin, setDurationMin] = useState('30');
   const [topic, setTopic] = useState('');
   const [discussionNotes, setDiscussionNotes] = useState('');
+  // Achievements/Blockers/Feedback are plain open boxes, typed directly —
+  // per a direct follow-up request, reverted from the AI-draft-first flow
+  // (the /connect-extract endpoint that used to fill these still exists
+  // and works, just isn't called from this form anymore).
   const [achievements, setAchievements] = useState('');
   const [blockers, setBlockers] = useState('');
   const [feedback, setFeedback] = useState('');
-  const [extracting, setExtracting] = useState(false);
-  const [extracted, setExtracted] = useState(false);
   const [team, setTeam] = useState(null);
   const [kraOptions, setKraOptions] = useState([]);
   const [kraIds, setKraIds] = useState([]);
   // "Connect Cadence / Progress this cycle / Next due" header, per the
   // reference screenshot — meaningful once an employee is picked, since
-  // it's cadence tracking FOR that specific report.
+  // it's cadence tracking FOR that specific report. Calculated from the
+  // Date field entered per connect (held_at) — see connect-reminders.js's
+  // computeCadenceProgress.
   const [cadence, setCadence] = useState(null);
-  // Action items — built up locally before the connect exists at all;
-  // sent together with the connect on save (migration 018).
-  const [actionItems, setActionItems] = useState([]);
   const [err, setErr] = useState(null);
   useEffect(() => { api('/pms/team/evaluations').then(r => setTeam(r.team || [])).catch(() => setTeam([])); }, []);
 
@@ -70,23 +67,6 @@ function NewConnectForm({ onSaved }) {
 
   const toggleKra = (id) => setKraIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
 
-  const addActionItem = () => setActionItems(items => [...items, { description: '', due_date: '' }]);
-  const updateActionItem = (i, field, value) => setActionItems(items => items.map((it, j) => j === i ? { ...it, [field]: value } : it));
-  const removeActionItem = (i) => setActionItems(items => items.filter((_, j) => j !== i));
-
-  const extract = async () => {
-    if (!discussionNotes.trim()) { setErr('Add what was discussed first — there\'s nothing to draft from yet.'); return; }
-    setExtracting(true); setErr(null);
-    try {
-      const r = await api('/agentic/connect-extract', { method: 'POST', body: JSON.stringify({ discussion_notes: discussionNotes, topic }) });
-      setAchievements(r.draft.achievements || '');
-      setBlockers(r.draft.blockers || '');
-      setFeedback(r.draft.feedback || '');
-      setExtracted(true);
-    } catch (e) { setErr(e.message); }
-    setExtracting(false);
-  };
-
   const save = async () => {
     setErr(null);
     if (!employeeId || !heldAt) { setErr('Employee and date are required.'); return; }
@@ -96,7 +76,6 @@ function NewConnectForm({ onSaved }) {
         body: JSON.stringify({
           employee_id: employeeId, held_at: heldAt, duration_min: durationMin || null, topic, discussion_notes: discussionNotes,
           achievements, blockers, feedback, kra_ids: kraIds,
-          action_items: actionItems.filter(i => i.description.trim()).map(i => ({ description: i.description.trim(), due_date: i.due_date || null })),
         }),
       });
       onSaved();
@@ -156,12 +135,8 @@ function NewConnectForm({ onSaved }) {
       <div>
         <label className="lbl">What was discussed?</label>
         <textarea className="inp" rows={4} placeholder="Catch-all narrative — what came up in the conversation"
-          value={discussionNotes} onChange={e => { setDiscussionNotes(e.target.value); setExtracted(false); }} />
+          value={discussionNotes} onChange={e => setDiscussionNotes(e.target.value)} />
       </div>
-      <button type="button" className="btn-sec" disabled={extracting} onClick={extract}>
-        <Sparkles size={13} className="inline mr-1 text-amber-500" />{extracting ? 'Drafting…' : 'Draft Achievements / Blockers / Feedback (agent)'}
-      </button>
-      {extracted && <DraftBadge />}
       <div className="grid sm:grid-cols-3 gap-2">
         <div>
           <label className="lbl text-emerald-600">Achievements</label>
@@ -174,23 +149,6 @@ function NewConnectForm({ onSaved }) {
         <div>
           <label className="lbl text-blue-600">Feedback</label>
           <textarea className="inp border-blue-200" rows={3} placeholder="Coaching / direction…" value={feedback} onChange={e => setFeedback(e.target.value)} />
-        </div>
-      </div>
-      <p className="text-[11px] text-navy-400">These are drafted from "What was discussed?" above — review and edit before saving; nothing here is final until you save.</p>
-      <div>
-        <div className="flex items-center justify-between">
-          <label className="lbl mb-0">Action items</label>
-          <button type="button" className="text-xs font-semibold text-brand-600" onClick={addActionItem}>+ Add</button>
-        </div>
-        <div className="space-y-1.5 mt-1.5">
-          {actionItems.map((item, i) => (
-            <div key={i} className="flex gap-1.5 items-center">
-              <input className="inp flex-1" placeholder="Action item…" value={item.description} onChange={e => updateActionItem(i, 'description', e.target.value)} />
-              <input className="inp w-36" type="date" value={item.due_date} onChange={e => updateActionItem(i, 'due_date', e.target.value)} />
-              <button type="button" className="btn-sec !p-1.5" onClick={() => removeActionItem(i)}><Trash2 size={13} /></button>
-            </div>
-          ))}
-          {!actionItems.length && <p className="text-xs text-navy-400">No action items yet.</p>}
         </div>
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
@@ -214,10 +172,6 @@ function ConnectRow({ cn, reload }) {
     try { const r = await api('/agentic/connect-insights', { method: 'POST', body: JSON.stringify({ employee_id: cn.employee_id }) }); setInsight(r); }
     catch (e) { setErr(e.message); }
     setBusy(false);
-  };
-  const toggleActionItem = async (item) => {
-    try { await api(`/pms/connects/${cn.id}/action-items/${item.id}`, { method: 'PUT', body: JSON.stringify({ done: !item.done }) }); reload(); }
-    catch (e) { setErr(e.message); }
   };
 
   return (
@@ -245,33 +199,56 @@ function ConnectRow({ cn, reload }) {
       {Array.isArray(cn.kra_ids) && cn.kra_ids.length > 0 && (
         <p className="text-[11px] text-navy-400">Linked to {cn.kra_ids.length} KRA{cn.kra_ids.length === 1 ? '' : 's'}</p>
       )}
-      {Array.isArray(cn.action_items) && cn.action_items.length > 0 && (
-        <div className="space-y-1">
-          <p className="lbl mb-0.5">Action items</p>
-          {cn.action_items.map(item => (
-            <label key={item.id} className="flex items-center gap-2 text-xs text-navy-600">
-              <input type="checkbox" checked={item.done} onChange={() => toggleActionItem(item)} />
-              <span className={item.done ? 'line-through text-navy-400' : ''}>{item.description}</span>
-              {item.due_date && <span className="text-navy-400">· due {new Date(item.due_date).toLocaleDateString()}</span>}
-            </label>
-          ))}
-        </div>
-      )}
       <div className="flex gap-2">
         {!cn.signed_off && <button className="btn-sec" onClick={signOff}>Sign off</button>}
         <button className="btn-sec" disabled={busy} onClick={askInsights}><Sparkles size={12} className="inline mr-1 text-amber-500" />{busy ? 'Thinking…' : 'AI insights'}</button>
       </div>
-      {insight && (
-        <div className="bg-navy-800 text-slate-100 rounded-lg p-3 text-xs space-y-2">
-          <DraftBadge />
-          {(insight.themes || []).map((t, i) => (
-            <p key={i}>• <b>{t.name}</b>: {t.summary}{t.related_kra && <span className="text-amber-300"> (linked: {t.related_kra})</span>}</p>
-          ))}
-          {insight.sentiment_trend && <p className="text-cyan-300">Trend: {insight.sentiment_trend}</p>}
-          {(insight.suggested_followups || []).length > 0 && <p><b>Follow-ups:</b> {insight.suggested_followups.join(' · ')}</p>}
-        </div>
-      )}
+      {insight && <AiInsightsPanel insight={insight} onRefresh={askInsights} busy={busy} />}
       {err && <p className="text-xs text-rose-600">{err}</p>}
+    </div>
+  );
+}
+
+// Matches a reference screenshot's layout precisely: a status badge next
+// to the "AI Insights" label, an italic one-line verdict on the
+// employee's progress/performance, and two columns (Themes / Suggested
+// Follow-ups) rather than a flat list.
+const INSIGHT_STATUS_COLOR = {
+  'On Track': 'bg-emerald-100 text-emerald-700',
+  Excelling: 'bg-emerald-100 text-emerald-700',
+  Concerned: 'bg-amber-100 text-amber-700',
+  'At Risk': 'bg-rose-100 text-rose-700',
+};
+function AiInsightsPanel({ insight, onRefresh, busy }) {
+  return (
+    <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 text-xs space-y-3">
+      <div className="flex items-center gap-2">
+        <Sparkles size={13} className="text-indigo-500" />
+        <span className="font-bold tracking-wide text-indigo-700 text-[11px] uppercase">AI Insights</span>
+        {insight.status && <span className={`chip ${INSIGHT_STATUS_COLOR[insight.status] || 'bg-navy-50 text-navy-600'}`}>{insight.status}</span>}
+        <button className="ml-auto text-indigo-500 font-semibold flex items-center gap-1" disabled={busy} onClick={onRefresh}>
+          <Sparkles size={11} />refresh
+        </button>
+      </div>
+      {insight.headline && <p className="italic text-navy-700">"{insight.headline}"</p>}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <p className="font-bold text-indigo-700 text-[11px] uppercase tracking-wide mb-1">Themes</p>
+          <div className="space-y-1">
+            {(insight.themes || []).map((t, i) => (
+              <p key={i}>• <b>{t.name}</b>{t.summary ? `: ${t.summary}` : ''}{t.related_kra && <span className="text-amber-600"> (linked: {t.related_kra})</span>}</p>
+            ))}
+            {!(insight.themes || []).length && <p className="text-navy-400">No recurring themes yet.</p>}
+          </div>
+        </div>
+        <div>
+          <p className="font-bold text-indigo-700 text-[11px] uppercase tracking-wide mb-1">Suggested Follow-ups</p>
+          <div className="space-y-1">
+            {(insight.suggested_followups || []).map((f, i) => <p key={i}>→ {f}</p>)}
+            {!(insight.suggested_followups || []).length && <p className="text-navy-400">Nothing specific suggested yet.</p>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

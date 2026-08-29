@@ -221,13 +221,13 @@ router.get('/drafts', async (req, res) => {
 // requirement (attributed to a specific employee, not anonymous, and
 // explicitly links back to KRA ids already stored per connect).
 //
-// UPDATED: migration 017 replaced the old single `notes` blob with a
-// dedicated `discussion_notes` field (achievements/blockers/feedback are
-// now their own columns, populated via /connect-extract below, not part
-// of the free-text notes at all) — this was reading `cn.notes`, which
-// new connects never populate anymore, so it would have silently stopped
-// finding anything to summarise. Caught while building the extraction
-// endpoint below and fixed here rather than shipped broken.
+// UPDATED per a reference screenshot: now also derives a one-line
+// "headline" verdict on the employee's overall progress/performance and a
+// short status label (e.g. "Concerned", "On Track", "Excelling") — not
+// just recurring themes. Achievements/Blockers/Feedback (migration 014)
+// are now included in the input alongside the discussion narrative, since
+// those are exactly the signal a progress/performance read should draw
+// on, not just the free-text discussion.
 router.post('/connect-insights', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
@@ -237,9 +237,10 @@ router.post('/connect-insights', async (req, res) => {
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const connects = (await db.query(
-      `SELECT cn.held_at, COALESCE(cn.discussion_notes, cn.notes) AS notes, cn.kra_ids FROM pms.connects cn
-        WHERE cn.tenant_id=$1 AND cn.employee_id=$2 AND COALESCE(cn.discussion_notes, cn.notes) IS NOT NULL
-          AND length(trim(COALESCE(cn.discussion_notes, cn.notes)))>0
+      `SELECT cn.held_at, COALESCE(cn.discussion_notes, cn.notes) AS notes, cn.achievements, cn.blockers, cn.feedback, cn.kra_ids
+         FROM pms.connects cn
+        WHERE cn.tenant_id=$1 AND cn.employee_id=$2
+          AND (COALESCE(cn.discussion_notes, cn.notes, '') <> '' OR cn.achievements IS NOT NULL OR cn.blockers IS NOT NULL OR cn.feedback IS NOT NULL)
         ORDER BY cn.held_at DESC LIMIT 8`, [T(req), employee_id])).rows;
     if (!connects.length) return res.status(422).json({ error: 'No logged connects with notes to summarise yet' });
     const kraIds = [...new Set(connects.flatMap((c) => c.kra_ids || []))];
@@ -247,32 +248,41 @@ router.post('/connect-insights', async (req, res) => {
     const kraTitle = Object.fromEntries(kras.map((k) => [k.id, k.title]));
     const input = {
       employee: emp.name, connects_summarised: connects.length,
-      connects: connects.map((c) => ({ held_at: c.held_at, notes: c.notes, linked_kras: (c.kra_ids || []).map((id) => kraTitle[id]).filter(Boolean) })),
+      connects: connects.map((c) => ({
+        held_at: c.held_at, discussion: c.notes, achievements: c.achievements, blockers: c.blockers, feedback: c.feedback,
+        linked_kras: (c.kra_ids || []).map((id) => kraTitle[id]).filter(Boolean),
+      })),
     };
     const out = await ai.narrate({
       tenantId: T(req), kind: 'connect_insights', ref: { employee_id },
       requestedBy: req.user.email, input, maxTokens: 1200,
-      system: `You summarise a manager's own logged 1-on-1 notes about ONE employee across recent
-Quarterly Connects. Identify recurring themes and overall sentiment trend, and suggest
-concrete follow-ups for the next connect. Where a theme relates to a linked KRA
-(given in the input), name it. Ground everything in the input; invent nothing.
-Never suggest or imply a numeric rating.
+      system: `You read a manager's own logged 1-on-1 notes about ONE employee across recent
+Quarterly Connects (discussion narrative, plus any logged achievements/blockers/feedback) and
+produce a read on their overall progress and performance this cycle, not just a list of topics.
+Ground everything in the input; invent nothing not implied by it. Never suggest or imply a
+numeric rating — "status" is a qualitative read (e.g. "On Track", "Concerned", "Excelling",
+"At Risk"), not a score.
 Respond ONLY with JSON:
-{"themes":[{"name":"...","summary":"1-2 sentences","related_kra":"KRA title or null"}],"sentiment_trend":"one sentence","suggested_followups":["..."]}`,
+{"headline":"one sentence verdict on their progress/performance this cycle","status":"On Track|Concerned|Excelling|At Risk",
+"themes":[{"name":"...","summary":"1-2 sentences","related_kra":"KRA title or null"}],
+"suggested_followups":["..."]}`,
     });
     res.json({ ok: true, ...out });
   } catch (e) { fail(res, e); }
 });
 
-// 7) Connect extract — the piece that makes "Achievements / Blockers /
-// Feedback are derived from the discussion, not typed separately" real.
-// Input is the raw "What was discussed?" text the manager just typed for
-// ONE connect (not yet saved) plus optional Topic for context; output is
-// a draft split into the three fields, which the manager can accept as-is
-// or edit before saving — same "draft, human decides" pattern as every
-// other AI feature here (appraisal-draft, calibration-brief, etc.). This
-// does not read or write pms.connects at all; it is pure text-in/text-out,
-// callable before the connect exists.
+// 7) Connect extract — was called from the "Log a connect" form to
+// auto-derive Achievements/Blockers/Feedback from the discussion text.
+// Per a direct follow-up request, Achievements/Blockers/Feedback are back
+// to plain open boxes on that form (no button/gating needed to use them),
+// and progress/performance derivation now happens via /connect-insights
+// above instead, on already-logged connects. Left in place, working and
+// tested, rather than deleted — it may still be useful wired up elsewhere,
+// and there's no cost to keeping a correct, unused endpoint.
+// Input is the raw "What was discussed?" text for ONE connect (not yet
+// saved) plus optional Topic for context; output is a draft split into
+// the three fields — same "draft, human decides" pattern as every other
+// AI feature here. Does not read or write pms.connects at all.
 router.post('/connect-extract', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
