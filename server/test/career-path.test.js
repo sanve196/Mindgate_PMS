@@ -136,3 +136,21 @@ test('career path: editing is blocked outside the growth_planning phase', { skip
   assert.equal(getResp.body.editable, true);
   assert.equal(getResp.body.cycle_phase, 'growth_planning');
 });
+
+// Found missing: employees could set a target role and a plan narrative,
+// but nowhere to say WHEN they expect to get there.
+test('career path: expected timeline is saved and returned alongside target role', { skip }, async () => {
+  const { token } = await login('cp-emp@x.com');
+  const set = await api('/people/career/my-path', token, {
+    method: 'PUT', body: JSON.stringify({ target_role: 'L4', target_timeline: '12-18 months', plan: 'Grow into a tech-lead role' }),
+  });
+  assert.equal(set.status, 200);
+
+  const get = await api('/people/career/my-path', token);
+  assert.equal(get.body.path.target_timeline, '12-18 months');
+
+  const mgrAuth = await login('cp-mgr@x.com');
+  const teamView = await api('/people/career/team', mgrAuth.token);
+  const row = teamView.body.team.find((x) => x.employee_id === empId);
+  assert.equal(row.target_timeline, '12-18 months', 'manager view also surfaces the timeline');
+});

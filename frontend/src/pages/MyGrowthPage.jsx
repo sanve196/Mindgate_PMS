@@ -143,10 +143,10 @@ function ProgressBar({ value, onChange, readOnly }) {
 // ---------------- Career Path (BR-3.1/3.2) ----------------------------------
 function CareerPathCard() {
   const [data, setData] = useState(null);
-  const [form, setForm] = useState({ target_role: '', plan: '' });
+  const [form, setForm] = useState({ target_role: '', target_timeline: '', plan: '' });
   const [err, setErr] = useState(null);
   const [saved, setSaved] = useState(false);
-  const load = () => api('/people/career/my-path').then(r => { setData(r); setForm({ target_role: r.path?.target_role || '', plan: r.path?.plan || '' }); }).catch(e => setErr(e.message));
+  const load = () => api('/people/career/my-path').then(r => { setData(r); setForm({ target_role: r.path?.target_role || '', target_timeline: r.path?.target_timeline || '', plan: r.path?.plan || '' }); }).catch(e => setErr(e.message));
   useEffect(() => { load(); }, []);
 
   const save = async () => {
@@ -182,6 +182,10 @@ function CareerPathCard() {
           <input className="inp" value={form.target_role} disabled={!editable} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))} placeholder="e.g. Staff Engineer" />
         )}
         {data.eligible_role_bands.length > 0 && <p className="text-[11px] text-navy-400 mt-1">Limited to your organisation's configured role bands (guardrails).</p>}
+      </div>
+      <div>
+        <label className="lbl">Expected timeline</label>
+        <input className="inp" value={form.target_timeline} disabled={!editable} onChange={e => setForm(f => ({ ...f, target_timeline: e.target.value }))} placeholder="e.g. 12-18 months" />
       </div>
       <div>
         <label className="lbl">Growth plan</label>

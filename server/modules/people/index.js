@@ -290,7 +290,7 @@ router.put('/career/matrix', async (req, res) => {
 // nothing is blocked (an unconfigured guardrail can't guard anything yet).
 router.get('/career/my-path', async (req, res) => {
   try {
-    const p = (await db.query(`SELECT target_role, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [T(req), req.user.id])).rows[0];
+    const p = (await db.query(`SELECT target_role, target_timeline, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [T(req), req.user.id])).rows[0];
     const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1 ORDER BY role_band`, [T(req)])).rows.map((r) => r.role_band);
     const phase = await activeCyclePhase(T(req));
     res.json({ path: p || null, eligible_role_bands: bands, cycle_phase: phase, editable: pm.phaseAllows(phase, 'career_edit') });
@@ -303,16 +303,16 @@ router.put('/career/my-path', async (req, res) => {
     if (!pm.phaseAllows(phase, 'career_edit')) {
       return res.status(409).json({ error: `Career Path editing is not open (phase: ${phase || 'no active cycle'}) — opens once HR locks KRAs and moves the cycle to Growth Planning` });
     }
-    const { target_role, plan } = req.body || {};
+    const { target_role, target_timeline, plan } = req.body || {};
     if (!target_role || !String(target_role).trim()) return res.status(400).json({ error: 'target_role required' });
     const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1`, [T(req)])).rows.map((r) => r.role_band);
     if (bands.length && !bands.includes(target_role)) {
       return res.status(422).json({ error: `target_role must be one of the organisation's configured guardrails: ${bands.join(', ')}` });
     }
     await db.query(
-      `INSERT INTO people.career_paths (tenant_id, employee_id, target_role, plan) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (tenant_id, employee_id) DO UPDATE SET target_role=EXCLUDED.target_role, plan=EXCLUDED.plan, updated_at=now()`,
-      [T(req), req.user.id, target_role.trim(), plan || null]);
+      `INSERT INTO people.career_paths (tenant_id, employee_id, target_role, target_timeline, plan) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (tenant_id, employee_id) DO UPDATE SET target_role=EXCLUDED.target_role, target_timeline=EXCLUDED.target_timeline, plan=EXCLUDED.plan, updated_at=now()`,
+      [T(req), req.user.id, target_role.trim(), (target_timeline || '').trim() || null, plan || null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -325,7 +325,7 @@ router.get('/career/team', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const r = await db.query(
-      `SELECT e.id AS employee_id, e.name, cp.target_role, cp.plan, cp.updated_at
+      `SELECT e.id AS employee_id, e.name, cp.target_role, cp.target_timeline, cp.plan, cp.updated_at
          FROM core.employees e LEFT JOIN people.career_paths cp ON cp.tenant_id=e.tenant_id AND cp.employee_id=e.id
         WHERE e.tenant_id=$1 AND e.manager_id=$2 AND e.status='active' ORDER BY e.name`, [T(req), req.user.id]);
     res.json({ team: r.rows });
