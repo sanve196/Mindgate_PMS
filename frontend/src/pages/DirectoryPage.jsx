@@ -1,8 +1,21 @@
-import { useEffect, useState, Fragment } from 'react';
-import { Settings2, Trash2 } from 'lucide-react';
+import { useEffect, useState, useMemo, Fragment } from 'react';
+import { Settings2, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { api } from '../utils/api';
 
 const ROLES = ['employee', 'manager', 'hod', 'hr', 'admin'];
+
+// Which employee field each sortable column reads. Keys here are also
+// the internal identifiers used in sort state — they're never shown to
+// the user, so column header labels can change without touching this.
+const SORT_FIELDS = {
+  emp_code: 'emp_code',
+  name: 'name',
+  email: 'email',
+  department: 'department',
+  manager_email: 'manager_email',
+  status: 'status',
+  role: 'role',
+};
 
 export default function DirectoryPage() {
   const [rows, setRows] = useState(null);
@@ -10,8 +23,66 @@ export default function DirectoryPage() {
   const [file, setFile] = useState(null);
   const [err, setErr] = useState(null);
   const [openId, setOpenId] = useState(null);
+  const [query, setQuery] = useState('');
+  // Default sort matches the server's own ORDER BY name — the same
+  // ordering people currently see, just now explicitly a starting state
+  // that they can change rather than an unchangeable server-side choice.
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDir, setSortDir] = useState('asc'); // 'asc' | 'desc'
+
   const load = () => api('/employees').then(r => setRows(r.employees)).catch(e => setErr(e.message));
   useEffect(() => { load(); }, []);
+
+  // Filter + sort in ONE memoised pass so unrelated re-renders (opening
+  // a Manage panel, typing in the setup form) don't re-run this. The
+  // filter is intentionally forgiving — a single query string matched
+  // against the fields a user could plausibly remember (name, email,
+  // employee id, department, manager email), case-insensitive — rather
+  // than making the user pick which column to search first.
+  const displayedRows = useMemo(() => {
+    if (!rows) return null;
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? rows.filter(r =>
+          (r.name || '').toLowerCase().includes(q) ||
+          (r.email || '').toLowerCase().includes(q) ||
+          (r.emp_code || '').toLowerCase().includes(q) ||
+          (r.department || '').toLowerCase().includes(q) ||
+          (r.manager_email || '').toLowerCase().includes(q))
+      : rows;
+
+    const field = SORT_FIELDS[sortKey];
+    const sorted = [...filtered].sort((a, b) => {
+      const av = (a[field] || '').toString().toLowerCase();
+      const bv = (b[field] || '').toString().toLowerCase();
+      // Rows with an empty value for this field sort AFTER rows with a
+      // value in ascending order — putting blanks at the end regardless
+      // of direction feels less jarring than mixing them in via the
+      // usual "" < "a" comparison, and matches most spreadsheet UIs.
+      if (av === '' && bv !== '') return 1;
+      if (bv === '' && av !== '') return -1;
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [rows, query, sortKey, sortDir]);
+
+  // Click a column header to sort by it. Clicking the SAME column
+  // toggles ascending <-> descending; clicking a DIFFERENT column
+  // switches to it and resets to ascending — the same pattern as every
+  // spreadsheet and admin table people have used before.
+  const clickHeader = (key) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+
+  const SortIcon = ({ column }) => {
+    if (sortKey !== column) return <ArrowUpDown size={10} className="inline ml-1 opacity-30" />;
+    return sortDir === 'asc'
+      ? <ArrowUp size={10} className="inline ml-1 text-brand-500" />
+      : <ArrowDown size={10} className="inline ml-1 text-brand-500" />;
+  };
 
   const send = async (commit) => {
     setErr(null);
@@ -56,47 +127,76 @@ export default function DirectoryPage() {
         )}
       </div>
       {!rows ? <p className="text-sm text-navy-400">Loading…</p> : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
-              <tr><th className="text-left px-3 py-2">Employee ID</th><th className="text-left px-3 py-2">Name</th>
-                <th className="text-left px-3 py-2">Email</th>
-                <th className="text-left px-3 py-2">Department</th><th className="text-left px-3 py-2">Manager's Email</th>
-                <th className="text-left px-3 py-2">Status</th><th className="text-left px-3 py-2">Login</th>
-                <th className="text-left px-3 py-2">Role</th><th className="px-3 py-2" /></tr>
-            </thead>
-            <tbody className="divide-y divide-navy-100">
-              {rows.map(r => (
-                <Fragment key={r.id}>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-navy-500">{r.emp_code || '—'}</td>
-                    <td className="px-3 py-2 font-semibold">{r.name}</td><td className="px-3 py-2">{r.email}</td>
-                    <td className="px-3 py-2">{r.department || '—'}</td>
-                    <td className="px-3 py-2">{r.manager_email || '—'}</td><td className="px-3 py-2">{r.status}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <span className={`chip ${r.has_login ? 'bg-leaf-50 text-leaf-600' : 'bg-navy-50 text-navy-500'}`}>{r.has_login ? 'Active' : 'None yet'}</span>
-                    </td>
-                    <td className="px-3 py-2 capitalize">{r.role}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <button className="btn-sec !py-1 mr-1" onClick={() => setOpenId(v => v === r.id ? null : r.id)}>
-                        <Settings2 size={12} className="inline mr-1" />Manage
-                      </button>
-                      <button
-                        className="btn !py-1 text-white bg-rose-600 hover:bg-rose-700"
-                        onClick={() => quickDelete(r)}
-                        title={`Delete ${r.name}`}
-                      >
-                        <Trash2 size={12} className="inline mr-1" />Delete
-                      </button>
-                    </td>
-                  </tr>
-                  {openId === r.id && (
-                    <tr><td colSpan={9} className="px-3 pb-3 bg-navy-50/50"><EmployeePanel employee={r} onDone={() => { setOpenId(null); load(); }} /></td></tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 pointer-events-none" />
+              <input
+                type="text"
+                className="inp pl-9"
+                placeholder="Search by name, email, employee ID, department, or manager…"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-navy-400">
+              {displayedRows.length} of {rows.length} {rows.length === 1 ? 'employee' : 'employees'}
+              {query && ' (filtered)'}
+            </p>
+          </div>
+
+          <div className="card overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
+                <tr>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('emp_code')}>Employee ID<SortIcon column="emp_code" /></th>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('name')}>Name<SortIcon column="name" /></th>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('email')}>Email<SortIcon column="email" /></th>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('department')}>Department<SortIcon column="department" /></th>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('manager_email')}>Manager's Email<SortIcon column="manager_email" /></th>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('status')}>Status<SortIcon column="status" /></th>
+                  <th className="text-left px-3 py-2">Login</th>
+                  <th className="text-left px-3 py-2 cursor-pointer hover:bg-navy-100 select-none" onClick={() => clickHeader('role')}>Role<SortIcon column="role" /></th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-navy-100">
+                {displayedRows.length === 0 ? (
+                  <tr><td colSpan={9} className="px-3 py-8 text-center text-navy-400">
+                    {query ? `No employees match "${query}".` : 'No employees yet.'}
+                  </td></tr>
+                ) : displayedRows.map(r => (
+                  <Fragment key={r.id}>
+                    <tr>
+                      <td className="px-3 py-2 font-mono text-navy-500">{r.emp_code || '—'}</td>
+                      <td className="px-3 py-2 font-semibold">{r.name}</td><td className="px-3 py-2">{r.email}</td>
+                      <td className="px-3 py-2">{r.department || '—'}</td>
+                      <td className="px-3 py-2">{r.manager_email || '—'}</td><td className="px-3 py-2">{r.status}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={`chip ${r.has_login ? 'bg-leaf-50 text-leaf-600' : 'bg-navy-50 text-navy-500'}`}>{r.has_login ? 'Active' : 'None yet'}</span>
+                      </td>
+                      <td className="px-3 py-2 capitalize">{r.role}</td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button className="btn-sec !py-1 mr-1" onClick={() => setOpenId(v => v === r.id ? null : r.id)}>
+                          <Settings2 size={12} className="inline mr-1" />Manage
+                        </button>
+                        <button
+                          className="btn !py-1 text-white bg-rose-600 hover:bg-rose-700"
+                          onClick={() => quickDelete(r)}
+                          title={`Delete ${r.name}`}
+                        >
+                          <Trash2 size={12} className="inline mr-1" />Delete
+                        </button>
+                      </td>
+                    </tr>
+                    {openId === r.id && (
+                      <tr><td colSpan={9} className="px-3 pb-3 bg-navy-50/50"><EmployeePanel employee={r} onDone={() => { setOpenId(null); load(); }} /></td></tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
