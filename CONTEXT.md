@@ -14,6 +14,45 @@ Product Specification v1.0; Extraction Plan) — ask if not provided.
 4. Never commit node_modules/, dist/, or any secret (scan in the shipping skill).
 
 ## State (update this section every session)
+- 29-Aug-2026: **Inline single-employee profile edit built** — asked
+  directly whether designation/department/etc. could be edited after
+  import; the honest answer was "only by re-uploading the whole file,"
+  which is clunky for a one-field fix. Built the missing convenience.
+  New PUT /employees/:employeeId (people_admin-only, core/employees.js):
+  edits name/department/designation/role_band/manager (by email lookup)/
+  date_of_joining/status directly. email is DELIBERATELY not accepted by
+  this route at all — core.local_credentials and core.user_roles are
+  both keyed by (tenant_id, email), not employee id, so changing email
+  here without also cascading that change would silently orphan someone's
+  password and role. Simpler and safer to just not allow it from this
+  quick-edit form; re-import (which already upserts by email) remains
+  the path for that. Manager resolution is stricter/more helpful than
+  the bulk importer's: looks up the email against the actual database
+  (not just rows in an uploaded file) and returns a clear 422 with the
+  reason if it can't find them or if it would make someone their own
+  manager, rather than the importer's silent no-op on an unresolvable
+  manager. Reuses the exact same BR-1.5 open-cycle-only propagation the
+  bulk importer already had for a manager change (KRA sheets/dev plans
+  on OPEN cycles follow the new manager; CLOSED cycles keep the original,
+  for audit accuracy) — this edit path can change someone's manager too,
+  so it needed the identical fix, not a narrower one.
+  Frontend: DirectoryPage.jsx's "Manage access" button and panel were
+  combined into a single "Manage" button opening one panel with two
+  sections — Edit profile, and Access (the password/role feature from
+  earlier) — rather than two separate buttons/panels per row.
+  VERIFIED LIVE against real Postgres: fixed a real test employee's
+  designation from null to "Senior Software Engineer" (plus department
+  and role_band) via the actual HTTP route, confirmed the change
+  persisted on the next GET — the exact real-world scenario that
+  prompted building this.
+  test/employee-edit.test.js: 5 integration tests, including one
+  confirming the open/closed-cycle manager-propagation distinction holds
+  for this route too. Hit and fixed a test typo of my own (asserted
+  lowercase "mgrb" against a seeded email actually cased "mgrB" — the app
+  correctly preserves stored casing; the test's expectation was wrong,
+  not the app).
+  122/122 backend tests pass (53/122, 69 skipped, without DB); clean
+  production build.
 - 29-Aug-2026: **HR-provisioned login credentials + role assignment
   built.** Asked directly whether creating users "through the
   application" was OK — the honest answer was no: beyond the one-time

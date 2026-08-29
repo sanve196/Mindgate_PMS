@@ -297,6 +297,58 @@ router.get('/', async (req, res) => {
   } catch (e) { logger.error('employees list', { error: e.message }); res.status(500).json({ error: e.message }); }
 });
 
+// Direct, single-employee edit — profile fields only (name/department/
+// designation/role_band/manager/date_of_joining/status). email is
+// DELIBERATELY not editable here: core.local_credentials and
+// core.user_roles are both keyed by (tenant_id, email), not employee id —
+// changing an employee's email through this route without also cascading
+// that change to those two tables would silently orphan their password
+// and role, breaking their login with no visible error anywhere. Simpler
+// and safer to just not allow it from this quick-edit form; re-import via
+// CSV/Excel (which already upserts by email as the identity) remains the
+// path for that, same as it always has been.
+router.put('/:employeeId', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const emp = (await db.query(`SELECT id, email FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, req.user.tenant_id])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+
+    const { name, department, designation, role_band, manager_email, date_of_joining, status } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
+
+    let managerId = null;
+    if (manager_email && manager_email.trim()) {
+      const me = manager_email.trim().toLowerCase();
+      if (me === emp.email.toLowerCase()) return res.status(422).json({ error: 'an employee cannot be their own manager' });
+      const mgr = (await db.query(`SELECT id FROM core.employees WHERE tenant_id=$1 AND LOWER(email)=$2`, [req.user.tenant_id, me])).rows[0];
+      if (!mgr) return res.status(422).json({ error: `no employee with email "${me}" exists yet — add them first, or leave manager blank` });
+      managerId = mgr.id;
+    }
+    const dojParsed = date_of_joining ? flexDate(date_of_joining) : null;
+    if (date_of_joining && !dojParsed) return res.status(422).json({ error: `date_of_joining "${date_of_joining}" isn't a recognisable date` });
+
+    await db.query(
+      `UPDATE core.employees SET name=$1, department=$2, designation=$3, role_band=$4,
+              manager_id=$5, date_of_joining=$6, status=COALESCE($7,status), updated_at=now()
+        WHERE id=$8`,
+      [name.trim(), department || null, designation || null, role_band || null, managerId, dojParsed, status || null, emp.id]);
+
+    // Same BR-1.5 propagation the bulk importer already does for a manager
+    // change — this edit path can change someone's manager too, so it
+    // needs the identical fix, not a narrower one.
+    await db.query(
+      `UPDATE pms.kra_sheets ks SET manager_id=$1, updated_at=now()
+         FROM pms.cycles c WHERE ks.employee_id=$2 AND ks.cycle_id=c.id AND c.phase NOT IN ('closed','cancelled')`,
+      [managerId, emp.id]);
+    await db.query(
+      `UPDATE pms.development_plans dp SET manager_id=$1, updated_at=now()
+         FROM pms.cycles c WHERE dp.employee_id=$2 AND dp.cycle_id=c.id AND c.phase NOT IN ('closed','cancelled')`,
+      [managerId, emp.id]);
+
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // HR-provisioned login access — the ONLY way, right now, for anyone other
 // than the original one-time bootstrap admin to get a real login. Real
 // production auth is meant to be the client's SSO/IdP (core/auth.js's own
