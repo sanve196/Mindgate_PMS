@@ -90,15 +90,26 @@ function GoalList({ goals: initial, editable, onSaved }) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {goals.map((g, i) => (
-        <div key={g.id || i} className="border border-navy-100 rounded-lg p-2 space-y-1.5">
-          <div className="flex gap-1.5">
-            <input className="inp flex-1" placeholder="Goal title" value={g.title} onChange={e => update(i, 'title', e.target.value)} />
-            <input className="inp w-32" type="date" value={g.target_date || ''} onChange={e => update(i, 'target_date', e.target.value)} />
-            <button className="btn-sec !p-1.5" onClick={() => remove(i)}><Trash2 size={13} /></button>
+        <div key={g.id || i} className="border border-navy-100 rounded-xl p-3.5 space-y-3 bg-white">
+          <div className="flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <label className="lbl">Goal title</label>
+              <input className="inp w-full font-medium" placeholder="e.g. Cloud Architecture Certification"
+                value={g.title} onChange={e => update(i, 'title', e.target.value)} />
+            </div>
+            <button className="btn-sec !p-1.5 mt-6 shrink-0" onClick={() => remove(i)} title="Remove goal"><Trash2 size={13} /></button>
           </div>
-          <input className="inp w-full" placeholder="Description (optional)" value={g.description || ''} onChange={e => update(i, 'description', e.target.value)} />
+          <div className="max-w-[200px]">
+            <label className="lbl">Target date</label>
+            <input className="inp w-full" type="date" value={g.target_date || ''} onChange={e => update(i, 'target_date', e.target.value)} />
+          </div>
+          <div>
+            <label className="lbl">Description (optional)</label>
+            <textarea className="inp w-full" rows={4} placeholder="Add detail — what you'll do, resources you'll use, milestones along the way. Paste as much as you need."
+              value={g.description || ''} onChange={e => update(i, 'description', e.target.value)} />
+          </div>
         </div>
       ))}
       <div className="flex gap-2">
