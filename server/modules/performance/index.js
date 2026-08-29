@@ -608,6 +608,22 @@ router.get('/team/development-plans', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Manager needed to Approve/Return with only a goal count + avg progress
+// visible — no way to actually read what the employee wrote before
+// deciding. Mirrors GET /team/kra-sheets/:sheetId/kras' shape (plan +
+// full goal list), scoped to the manager the same way.
+router.get('/team/development-plans/:planId/goals', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const p = (await db.query(`SELECT * FROM pms.development_plans WHERE id=$1 AND tenant_id=$2`, [req.params.planId, T(req)])).rows[0];
+    if (!p) return res.status(404).json({ error: 'plan not found' });
+    if (p.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')))
+      return res.status(403).json({ error: 'Not your report' });
+    const goals = (await db.query(`SELECT * FROM pms.development_goals WHERE plan_id=$1 ORDER BY sort_order`, [p.id])).rows;
+    res.json({ plan: p, goals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/team/development-plans/:planId/decide', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });

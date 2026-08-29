@@ -121,15 +121,21 @@ function GoalList({ goals: initial, editable, onSaved }) {
   );
 }
 
-function ProgressBar({ value, onChange }) {
+function ProgressBar({ value, onChange, readOnly }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-2 bg-navy-100 rounded-full overflow-hidden">
         <div className="h-full bg-emerald-500" style={{ width: `${value}%` }} />
       </div>
-      <input className="inp w-16 !py-0.5 text-right" type="number" min="0" max="100" value={value}
-        onChange={e => onChange(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} />
-      <span className="text-[10px] text-navy-400">%</span>
+      {readOnly ? (
+        <span className="text-xs font-medium text-navy-500 w-10 text-right">{value}%</span>
+      ) : (
+        <>
+          <input className="inp w-16 !py-0.5 text-right" type="number" min="0" max="100" value={value}
+            onChange={e => onChange(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} />
+          <span className="text-[10px] text-navy-400">%</span>
+        </>
+      )}
     </div>
   );
 }
@@ -199,6 +205,13 @@ function CareerPathCard() {
 // Development Plan stuck at "submitted" with no way to decide it is not a
 // usable feature — this closes that loop. Silently hidden for anyone
 // without pms_team_eval (the request 403s and the section just doesn't render).
+//
+// Rebuilt per direct feedback: the manager previously saw only a goal
+// count + avg progress with no way to actually read what the employee
+// wrote, and "Return with comment" used a native prompt() dialog (an
+// ugly browser popup, not part of the page). Now mirrors
+// TeamKraSheetsPage.jsx's pattern: expand a report to see every goal in
+// full, with the comment box inline on the page itself.
 function TeamDevelopmentPlans() {
   const [data, setData] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -211,33 +224,74 @@ function TeamDevelopmentPlans() {
     <div className="space-y-2">
       <p className="font-bold text-sm">Team Development Plans</p>
       {data.plans.map(p => (
-        <div key={p.id} className="card">
+        <div key={p.id} className="card overflow-hidden">
           <button className="w-full flex items-center justify-between px-4 py-3 text-left" onClick={() => setOpenId(v => v === p.id ? null : p.id)}>
             <span className="text-sm font-semibold flex-1">{p.employee_name}</span>
             <span className="text-xs text-navy-400 mr-2">{p.goal_count} goals · {p.avg_progress}% avg</span>
             <span className={`chip ${STATUS_COLOR[p.status]}`}>{p.status}</span>
           </button>
-          {openId === p.id && <TeamPlanDecide plan={p} reload={load} />}
+          {openId === p.id && <TeamPlanDetail plan={p} reload={load} />}
         </div>
       ))}
     </div>
   );
 }
 
-function TeamPlanDecide({ plan, reload }) {
+function TeamPlanDetail({ plan, reload }) {
+  const [detail, setDetail] = useState(null);
   const [err, setErr] = useState(null);
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api(`/pms/team/development-plans/${plan.id}/goals`).then(setDetail).catch(e => setErr(e.message));
+  }, [plan.id]);
+
   const decide = async (decision) => {
-    setErr(null);
-    const comment = decision === 'returned' ? prompt('Reason for returning (required):') : null;
-    if (decision === 'returned' && !comment) return;
-    try { await api(`/pms/team/development-plans/${plan.id}/decide`, { method: 'POST', body: JSON.stringify({ decision, comment }) }); reload(); }
-    catch (e) { setErr(e.message); }
+    if (decision === 'returned' && !comment.trim()) { setErr('A return needs a comment — the employee must know why.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await api(`/pms/team/development-plans/${plan.id}/decide`, { method: 'POST', body: JSON.stringify({ decision, comment: comment.trim() || null }) });
+      reload();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
   };
-  if (plan.status !== 'submitted') return null;
+
+  const canDecide = plan.status === 'submitted';
+
   return (
-    <div className="border-t border-navy-100 p-3 flex gap-2">
-      <button className="btn-pri" onClick={() => decide('approved')}><CheckCircle2 size={13} className="inline mr-1" />Approve</button>
-      <button className="btn-sec" onClick={() => decide('returned')}><RotateCcw size={13} className="inline mr-1" />Return with comment</button>
+    <div className="border-t border-navy-100 p-4 space-y-3">
+      {plan.manager_comment && (
+        <div className="bg-navy-50 border border-navy-100 rounded-lg p-3 text-xs">
+          <p className="font-bold text-navy-500 uppercase text-[10px]">Your last comment</p>
+          <p>{plan.manager_comment}</p>
+        </div>
+      )}
+      {!detail && !err && <p className="text-xs text-navy-400">Loading goals…</p>}
+      {detail && (
+        <div className="space-y-2">
+          {!detail.goals.length && <p className="text-xs text-navy-400">No goals added yet.</p>}
+          {detail.goals.map(g => (
+            <div key={g.id} className="bg-navy-50 rounded-lg p-3 text-xs space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold flex-1">{g.title}</p>
+                {g.target_date && <span className="text-navy-400">Target: {new Date(g.target_date).toLocaleDateString()}</span>}
+              </div>
+              {g.description && <p className="text-navy-600">{g.description}</p>}
+              <ProgressBar value={g.progress_pct} onChange={() => {}} readOnly />
+            </div>
+          ))}
+        </div>
+      )}
+      {canDecide && (
+        <div className="space-y-2">
+          <textarea className="inp" rows={2} placeholder="Comment (required if returning)" value={comment} onChange={e => setComment(e.target.value)} />
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-pri" disabled={busy} onClick={() => decide('approved')}><CheckCircle2 size={13} className="inline mr-1" />Approve</button>
+            <button className="btn-sec" disabled={busy} onClick={() => decide('returned')}><RotateCcw size={13} className="inline mr-1" />Return for edits</button>
+          </div>
+        </div>
+      )}
       {err && <p className="text-xs text-rose-600">{err}</p>}
     </div>
   );

@@ -132,3 +132,22 @@ test('development plan: an unrelated employee cannot update someone else\'s goal
   const blocked = await api(`/pms/my/development-plan/goals/${goalId}/progress`, strangerAuth.token, { method: 'PUT', body: JSON.stringify({ progress_pct: 99 }) });
   assert.equal(blocked.status, 403);
 });
+
+// Manager previously saw only a goal count + avg progress on the review
+// card — no way to actually read what the employee wrote before
+// approving or returning it.
+test('development plan: manager can see full goal detail (title, description, target date) before deciding', { skip }, async () => {
+  const mgrAuth = await login('dp-mgr@x.com');
+  const teamView = await api('/pms/team/development-plans', mgrAuth.token);
+  const planId = teamView.body.plans[0].id;
+
+  const detail = await api(`/pms/team/development-plans/${planId}/goals`, mgrAuth.token);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.goals.length, 1);
+  assert.equal(detail.body.goals[0].title, 'Learn public speaking');
+  assert.equal(detail.body.goals[0].description, 'Toastmasters');
+
+  const strangerAuth = await login('dp-stranger@x.com');
+  const blocked = await api(`/pms/team/development-plans/${planId}/goals`, strangerAuth.token);
+  assert.equal(blocked.status, 403, 'not this employee\'s manager');
+});
