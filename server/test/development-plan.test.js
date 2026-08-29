@@ -34,7 +34,7 @@ before(async () => {
     await db.query(`INSERT INTO core.local_credentials (tenant_id, email, password_hash) VALUES ($1,$2,$3)`, [t.id, email, hash]);
   }
 
-  const cycle = (await db.query(`INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, phase) VALUES ($1,'DP Cycle','FYDP','annual','kra_open') RETURNING id`, [t.id])).rows[0];
+  const cycle = (await db.query(`INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, phase) VALUES ($1,'DP Cycle','FYDP','annual','growth_planning') RETURNING id`, [t.id])).rows[0];
 
   const app = express();
   app.use(cors());

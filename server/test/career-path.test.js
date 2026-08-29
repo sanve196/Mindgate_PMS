@@ -37,6 +37,11 @@ before(async () => {
   for (const email of ['cp-mgr@x.com', 'cp-emp@x.com']) {
     await db.query(`INSERT INTO core.local_credentials (tenant_id, email, password_hash) VALUES ($1,$2,$3)`, [t.id, email, hash]);
   }
+  // Career Path editing is gated to the growth_planning phase (see
+  // phase-machine.js) — "HR locks KRA, then Development Plan and Career
+  // Path open." Without an active cycle in this phase, every PUT below
+  // would 409.
+  await db.query(`INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, phase) VALUES ($1,'CP Cycle','FYCP','annual','growth_planning')`, [t.id]);
 
   const app = express();
   app.use(cors());
@@ -104,4 +109,30 @@ test('career path: an update replaces (upserts), not duplicates', { skip }, asyn
   await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'v2 of the plan' }) });
   const rows = await db.query(`SELECT COUNT(*)::int AS n FROM people.career_paths WHERE employee_id=$1`, [empId]);
   assert.equal(rows.rows[0].n, 1, 'upsert, not a second row');
+});
+
+// The feature this whole gate exists for: "after KRAs are approved by
+// managers, HR will move the cycle to lock KRA and it will open
+// development plan and career path." Editing must be blocked before
+// growth_planning and after it moves on, not just allowed during it.
+test('career path: editing is blocked outside the growth_planning phase', { skip }, async () => {
+  const t = (await db.query(`SELECT tenant_id FROM core.employees WHERE id=$1`, [empId])).rows[0].tenant_id;
+  const { token } = await login('cp-emp@x.com');
+
+  await db.query(`UPDATE pms.cycles SET phase='kra_open' WHERE tenant_id=$1`, [t]);
+  const beforeLock = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'too early' }) });
+  assert.equal(beforeLock.status, 409);
+  assert.match(beforeLock.body.error, /not open/);
+
+  await db.query(`UPDATE pms.cycles SET phase='self_appraisal' WHERE tenant_id=$1`, [t]);
+  const afterWindow = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'too late' }) });
+  assert.equal(afterWindow.status, 409);
+
+  await db.query(`UPDATE pms.cycles SET phase='growth_planning' WHERE tenant_id=$1`, [t]);
+  const duringWindow = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'right on time' }) });
+  assert.equal(duringWindow.status, 200);
+
+  const getResp = await api('/people/career/my-path', token);
+  assert.equal(getResp.body.editable, true);
+  assert.equal(getResp.body.cycle_phase, 'growth_planning');
 });

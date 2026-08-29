@@ -9,6 +9,7 @@ const logger = require('../../core/logger');
 const { authenticate } = require('../../core/auth');
 const { apiPermissionParity, hasPermission } = require('../../core/permissions');
 const { notify } = require('../../core/notifications');
+const pm = require('../performance/phase-machine');
 
 const router = express.Router();
 router.use(authenticate, apiPermissionParity);
@@ -17,6 +18,18 @@ const adminOnly = async (req, res) => {
   if (await hasPermission(req.user, 'people_admin')) return true;
   res.status(403).json({ error: "Requires 'people_admin'" }); return false;
 };
+// Small local lookup rather than importing modules/performance's own
+// activeCycle() — that function lives in a router file, not something
+// meant to be shared across modules. Same query shape (most recent
+// non-closed/cancelled cycle for the tenant, any cycle_type), used only
+// to gate Career Path editing to the growth_planning phase per the
+// explicit "lock KRA, then open Development Plan and Career Path" request.
+async function activeCyclePhase(tenantId) {
+  const r = await db.query(
+    `SELECT phase FROM pms.cycles WHERE tenant_id=$1 AND phase NOT IN ('closed','cancelled') ORDER BY created_at DESC LIMIT 1`,
+    [tenantId]);
+  return r.rows[0] ? r.rows[0].phase : null;
+}
 
 // ---- Awards -----------------------------------------------------------------
 router.get('/awards', async (req, res) => {
@@ -279,12 +292,17 @@ router.get('/career/my-path', async (req, res) => {
   try {
     const p = (await db.query(`SELECT target_role, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [T(req), req.user.id])).rows[0];
     const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1 ORDER BY role_band`, [T(req)])).rows.map((r) => r.role_band);
-    res.json({ path: p || null, eligible_role_bands: bands });
+    const phase = await activeCyclePhase(T(req));
+    res.json({ path: p || null, eligible_role_bands: bands, cycle_phase: phase, editable: pm.phaseAllows(phase, 'career_edit') });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.put('/career/my-path', async (req, res) => {
   try {
+    const phase = await activeCyclePhase(T(req));
+    if (!pm.phaseAllows(phase, 'career_edit')) {
+      return res.status(409).json({ error: `Career Path editing is not open (phase: ${phase || 'no active cycle'}) — opens once HR locks KRAs and moves the cycle to Growth Planning` });
+    }
     const { target_role, plan } = req.body || {};
     if (!target_role || !String(target_role).trim()) return res.status(400).json({ error: 'target_role required' });
     const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1`, [T(req)])).rows.map((r) => r.role_band);

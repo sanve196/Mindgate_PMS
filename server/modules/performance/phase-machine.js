@@ -3,7 +3,15 @@
 // order, rollback one step (HR-controlled, audited by the caller), cancel
 // from any non-closed phase. Downstream gates use phaseAllows().
 
-const ORDER = ['draft', 'kra_open', 'self_appraisal', 'manager_eval', 'hod_eval', 'calibration', 'publish', 'closed'];
+// growth_planning added per explicit request: "after KRAs are approved by
+// managers, HR will move the cycle to lock KRA and it will open
+// development plan and career path." Previously devplan_* shared the
+// kra_open window (see the old comment below, now out of date) — there
+// was no way to lock KRAs while still letting Development Plan/Career
+// Path stay open. This phase is that missing middle step: KRA is locked
+// the moment the cycle advances past kra_open, and Development Plan +
+// Career Path only become editable once it reaches growth_planning.
+const ORDER = ['draft', 'kra_open', 'growth_planning', 'self_appraisal', 'manager_eval', 'hod_eval', 'calibration', 'publish', 'closed'];
 
 function canAdvance(from, to) {
   const i = ORDER.indexOf(from), j = ORDER.indexOf(to);
@@ -25,18 +33,20 @@ function canCancel(from) {
   return from === 'closed' ? { ok: false, reason: 'closed cycles cannot be cancelled' } : { ok: true };
 }
 
-// What each phase permits (gates for downstream endpoints). Development
-// Plans reuse the kra_open window — same employee-authors/manager-approves
-// shape as KRAs, opened at the same point in the cycle per the BRD's
-// process flow (BR-2.1-2.3 alongside KRA setting), so no new phase is
-// needed, just new action names within the existing one.
+// What each phase permits (gates for downstream endpoints). KRA locks the
+// moment the cycle leaves kra_open — kra_edit/kra_submit/kra_decide are
+// NOT carried into growth_planning, by design (that's the "lock" HR asked
+// for). Development Plan and Career Path share the growth_planning window
+// (career_edit is a new action, consumed by modules/people's career path
+// route — the only one of these three that isn't in modules/performance).
 const ALLOWS = {
-  kra_open:       ['kra_edit', 'kra_submit', 'kra_decide', 'devplan_edit', 'devplan_submit', 'devplan_decide'],
-  self_appraisal: ['self_edit', 'self_submit'],
-  manager_eval:   ['manager_edit', 'manager_submit'],
-  hod_eval:       ['hod_edit', 'hod_submit'],
-  calibration:    ['calibrate', 'adjust', 'top_talent'],
-  publish:        ['publish'],
+  kra_open:        ['kra_edit', 'kra_submit', 'kra_decide'],
+  growth_planning: ['devplan_edit', 'devplan_submit', 'devplan_decide', 'career_edit'],
+  self_appraisal:  ['self_edit', 'self_submit'],
+  manager_eval:    ['manager_edit', 'manager_submit'],
+  hod_eval:        ['hod_edit', 'hod_submit'],
+  calibration:     ['calibrate', 'adjust', 'top_talent'],
+  publish:         ['publish'],
 };
 function phaseAllows(phase, action) {
   return (ALLOWS[phase] || []).includes(action);

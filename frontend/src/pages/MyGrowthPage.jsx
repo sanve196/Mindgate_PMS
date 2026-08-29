@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Send, CheckCircle2, RotateCcw } from 'lucide-react';
-import { api } from '../utils/api';
+import { api, phaseLabel, phaseColor } from '../utils/api';
 
 const STATUS_COLOR = {
   draft: 'bg-slate-100 text-navy-600',
@@ -142,28 +142,43 @@ function CareerPathCard() {
   if (err && !data) return <div className="card p-4"><p className="text-sm text-rose-600">{err}</p></div>;
   if (!data) return <div className="card p-4"><p className="text-sm text-navy-400">Loading…</p></div>;
 
+  // Fix guide item #6 follow-up: Career Path now opens alongside
+  // Development Plan once HR locks KRA and advances to Growth Planning,
+  // per the explicit request — previously this card had no phase gate at
+  // all and was always editable.
+  const editable = data.editable;
+
   return (
     <div className="card p-4 space-y-3">
-      <p className="font-bold text-sm">Career Path</p>
+      <div className="flex items-center gap-2">
+        <p className="font-bold text-sm flex-1">Career Path</p>
+        {data.cycle_phase && <span className={`chip ${phaseColor(data.cycle_phase)}`}>{phaseLabel(data.cycle_phase)}</span>}
+      </div>
       <div>
         <label className="lbl">Target role</label>
         {data.eligible_role_bands.length ? (
-          <select className="inp" value={form.target_role} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))}>
+          <select className="inp" value={form.target_role} disabled={!editable} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))}>
             <option value="">—</option>
             {data.eligible_role_bands.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         ) : (
-          <input className="inp" value={form.target_role} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))} placeholder="e.g. Staff Engineer" />
+          <input className="inp" value={form.target_role} disabled={!editable} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))} placeholder="e.g. Staff Engineer" />
         )}
         {data.eligible_role_bands.length > 0 && <p className="text-[11px] text-navy-400 mt-1">Limited to your organisation's configured role bands (guardrails).</p>}
       </div>
       <div>
         <label className="lbl">Growth plan</label>
-        <textarea className="inp" rows={4} value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))} placeholder="How you plan to get there" />
+        <textarea className="inp" rows={4} value={form.plan} disabled={!editable} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))} placeholder="How you plan to get there" />
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
-      <button className="btn-pri" onClick={save}>Save</button>
-      {saved && <span className="text-[11px] text-emerald-600 font-medium ml-2">Saved ✓</span>}
+      {editable ? (
+        <>
+          <button className="btn-pri" onClick={save}>Save</button>
+          {saved && <span className="text-[11px] text-emerald-600 font-medium ml-2">Saved ✓</span>}
+        </>
+      ) : (
+        <p className="text-xs text-navy-400">Career Path editing opens in the {phaseLabel('growth_planning')} phase, once HR locks KRAs.</p>
+      )}
     </div>
   );
 }
