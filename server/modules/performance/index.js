@@ -276,6 +276,35 @@ async function ensureKraSheet(tenantId, cycleId, employeeId) {
   return s;
 }
 
+// GET /pms/hr/kra-sheet/bulk-upload-template.csv — same reasoning as the
+// employee import template: a real "Download template" link instead of
+// asking HR to guess the expected columns. Header matches
+// KRA_BULK_KNOWN exactly; example rows show two KRAs for one employee
+// whose weights sum to 100, since that grouping rule is the least
+// obvious part of the format — remove the example rows before uploading.
+//
+// MUST be registered before GET /hr/kra-sheet/:employeeId below — Express
+// matches routes in registration order, and ":employeeId" matches ANY
+// path segment, including this literal one. Registering it after :employeeId
+// caused exactly this: a request for .../bulk-upload-template.csv was
+// swallowed by the param route, which then tried to use the literal
+// string "bulk-upload-template.csv" as a uuid in a SQL query and failed
+// with "invalid input syntax for type uuid" — found live during testing.
+router.get('/hr/kra-sheet/bulk-upload-template.csv', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const rows = [
+      KRA_BULK_KNOWN.join(','),
+      ['jane.sample@example.com', 'Improve client response time to <24hrs', '60', 'Own first-response SLA for assigned accounts', 'Avg response time tracked in helpdesk'].join(','),
+      ['jane.sample@example.com', 'Complete onboarding automation project', '40', 'Reduce manual setup steps for new joiners', 'Onboarding checklist automated in HRMS'].join(','),
+    ];
+    const csv = rows.join('\n') + '\n';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="kra_bulk_upload_template.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/hr/kra-sheet/:employeeId', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
@@ -400,27 +429,6 @@ function validateKraBulkRows(rows, knownEmails) {
     summary: { total_rows: out.length, employees: byEmployee.size, errors: errors.length, warnings: warnings.length },
   };
 }
-
-// GET /pms/hr/kra-sheet/bulk-upload-template.csv — same reasoning as the
-// employee import template: a real "Download template" link instead of
-// asking HR to guess the expected columns. Header matches
-// KRA_BULK_KNOWN exactly; example rows show two KRAs for one employee
-// whose weights sum to 100, since that grouping rule is the least
-// obvious part of the format — remove the example rows before uploading.
-router.get('/hr/kra-sheet/bulk-upload-template.csv', async (req, res) => {
-  try {
-    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
-    const rows = [
-      KRA_BULK_KNOWN.join(','),
-      ['jane.sample@example.com', 'Improve client response time to <24hrs', '60', 'Own first-response SLA for assigned accounts', 'Avg response time tracked in helpdesk'].join(','),
-      ['jane.sample@example.com', 'Complete onboarding automation project', '40', 'Reduce manual setup steps for new joiners', 'Onboarding checklist automated in HRMS'].join(','),
-    ];
-    const csv = rows.join('\n') + '\n';
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="kra_bulk_upload_template.csv"');
-    res.send(csv);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 const kraUpload = multer({
   storage: multer.memoryStorage(),
