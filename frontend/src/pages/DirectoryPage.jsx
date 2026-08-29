@@ -35,7 +35,7 @@ export default function DirectoryPage() {
   };
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
+    <div className="space-y-4 max-w-7xl mx-auto">
       <h2 className="text-lg font-bold">Employees</h2>
       <div className="card p-4 space-y-2">
         <p className="lbl">Bulk import — CSV or Excel (.xlsx), synced from your HRMS, dry run first</p>
@@ -73,7 +73,7 @@ export default function DirectoryPage() {
                     <td className="px-3 py-2 font-semibold">{r.name}</td><td className="px-3 py-2">{r.email}</td>
                     <td className="px-3 py-2">{r.department || '—'}</td>
                     <td className="px-3 py-2">{r.manager_email || '—'}</td><td className="px-3 py-2">{r.status}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 whitespace-nowrap">
                       <span className={`chip ${r.has_login ? 'bg-leaf-50 text-leaf-600' : 'bg-navy-50 text-navy-500'}`}>{r.has_login ? 'Active' : 'None yet'}</span>
                     </td>
                     <td className="px-3 py-2 capitalize">{r.role}</td>

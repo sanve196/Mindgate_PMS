@@ -25,7 +25,7 @@ export default function KraOrgOverviewPage() {
   const COUNTER_ORDER = ['not_started', 'draft', 'submitted', 'returned', 'approved'];
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-7xl mx-auto">
       <div>
         <h2 className="text-lg font-bold">Org-wide KRA Overview</h2>
         <p className="text-xs text-navy-400">{data.cycle.name} · every active employee's KRA status, with search and the ability to enter KRAs on someone's behalf.</p>

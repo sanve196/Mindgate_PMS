@@ -7,7 +7,7 @@ export default function WatchlistPage() {
   useEffect(() => { api('/pms/watchlist').then(r => setRows(r.watchlist)).catch(e => setErr(e.message)); }, []);
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
+    <div className="space-y-4 max-w-6xl mx-auto">
       <div>
         <h2 className="text-lg font-bold">Super 50 — High-Performer Watchlist</h2>
         <p className="text-xs text-navy-400">Employees with 3 consecutive top-tier ratings, most recently rated the highest grade. Recomputed automatically each time a cycle publishes; a lapsed streak removes someone from this list.</p>
