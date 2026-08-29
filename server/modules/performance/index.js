@@ -68,11 +68,21 @@ router.post('/cycles', async (req, res) => {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
     const { name, fiscal_year, cycle_type, description, rating_scale, bell_curve, opens_at, closes_at, pip_threshold } = req.body || {};
     if (!name || !fiscal_year) return res.status(400).json({ error: 'name and fiscal_year required' });
+    // Default rating scale switched from numeric 1-5 labels to letter
+    // grades (A+/A/B+/B/C/D) per explicit request, after flagging the
+    // ripple this causes — values stay numeric (1-6) underneath so
+    // existing math (weighted rating, bell curve, calibration adjustments)
+    // keeps working unchanged; only the LABELS shown to people changed,
+    // plus the scale widened from 5 to 6 points to fit 6 letter grades.
+    // Bell curve percentages (5/15/35/30/10/5) are exactly the mockup's own
+    // numbers for A+/A/B+/B/C/D, not invented separately.
+    // See rating-rules.js for the Super 50 (BR-6.5) A/A+ mapping, updated
+    // to match (top tier = 5 or 6, "A+" specifically = 6).
     const r = await db.query(
       `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, description, rating_scale, bell_curve, opens_at, closes_at, pip_threshold, created_by)
        VALUES ($1,$2,$3,COALESCE($4,'annual'),$5,COALESCE($6,DEFAULT),COALESCE($7,DEFAULT),$8,$9,COALESCE($10,DEFAULT),$11) RETURNING *`
-        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '[{"value":1,"label":"Needs Improvement"},{"value":2,"label":"Developing"},{"value":3,"label":"Meets Expectations"},{"value":4,"label":"Exceeds"},{"value":5,"label":"Outstanding"}]'::jsonb)`)
-        .replace('COALESCE($7,DEFAULT)', `COALESCE($7, '{"1":5,"2":15,"3":55,"4":20,"5":5}'::jsonb)`)
+        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '[{"value":6,"label":"A+"},{"value":5,"label":"A"},{"value":4,"label":"B+"},{"value":3,"label":"B"},{"value":2,"label":"C"},{"value":1,"label":"D"}]'::jsonb)`)
+        .replace('COALESCE($7,DEFAULT)', `COALESCE($7, '{"6":5,"5":15,"4":35,"3":30,"2":10,"1":5}'::jsonb)`)
         .replace('COALESCE($10,DEFAULT)', `COALESCE($10, 3.0)`),
       [T(req), name, fiscal_year, cycle_type || null, description || null, rating_scale ? JSON.stringify(rating_scale) : null,
        bell_curve ? JSON.stringify(bell_curve) : null, opens_at || null, closes_at || null, pip_threshold ?? null, req.user.email]);

@@ -10,6 +10,19 @@
 // cycles of one cycle_type, most-recent-first, already limited to the last
 // 3 by the caller's query. Returns false (not throws) on incomplete history
 // — fewer than 3 published cycles is simply not yet eligible, not an error.
+// BR-6.5: "3 consecutive A/A+ ratings, with the most recent cycle rated A+."
+// This ONLY ever evaluates ANNUAL cycle history (see /publish below), and
+// an annual cycle's own overall_rating comes from the separate 7-parameter
+// weighted engine (this file's computeWeightedRating, always 1-5) — NOT
+// from cycle.rating_scale, which is a different, midyear-facing field
+// (the manual "Overall rating" dropdown on non-annual cycles) that was
+// changed elsewhere to a 6-point A+/A/B+/B/C/D scale for display purposes.
+// Those two scales are intentionally decoupled: this function keeps
+// treating 4 as "A" and 5 as "A+" (the closest mapping onto the ACTUAL
+// 1-5 range annual ratings can reach), same as before that change.
+// Widening this to require a literal "6" would make Super 50 permanently
+// unreachable for every annual cycle, since none can ever score above 5 —
+// caught by testing the exact math before shipping, not assumed correct.
 function isSuper50Eligible(recentRatingsDesc) {
   if (!Array.isArray(recentRatingsDesc) || recentRatingsDesc.length < 3) return false;
   const top3 = recentRatingsDesc.slice(0, 3).map(Number);

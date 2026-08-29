@@ -46,8 +46,12 @@ export default function CalibrationPage() {
       )}
       <div className="card p-4">
         <p className="lbl">Distribution vs bell-curve targets</p>
+        {/* '6' bucket added for the midyear cycle's 6-point letter-grade
+            scale (A+=6..D=1) — annual cycles never populate it (their
+            rating tops out at 5 from the 7-parameter engine), so it just
+            shows 0 there, harmlessly. */}
         <div className="flex gap-3 flex-wrap">
-          {['1', '2', '3', '4', '5', 'unrated'].map(k => (
+          {['6', '5', '4', '3', '2', '1', 'unrated'].map(k => (
             <div key={k} className="text-center">
               <p className="text-lg font-bold">{dist[k] || 0}</p>
               <p className="text-[10px] text-navy-400">rating {k}</p>

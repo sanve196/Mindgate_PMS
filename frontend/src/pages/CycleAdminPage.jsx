@@ -97,12 +97,12 @@ export default function CycleAdminPage() {
 
 // Replaces three sequential prompt() dialogs (browser popups, not part of
 // the page) with a proper in-page form, per a direct request with a
-// mockup. Note on the "Defaults applied" box: it shows the scale/bell
-// curve this app actually ships with (a numeric 1-5 scale) rather than
-// the mockup's illustrative A+/A/B+/B/C/D letter grades — switching the
-// whole rating system to letter grades would ripple through calibration,
-// 9-Box, and Super 50 (all built around 1-5 numbers) well beyond what was
-// asked here; flagged back to the requester rather than silently changed.
+// mockup. The "Defaults applied" box shows the actual A+/A/B+/B/C/D
+// letter-grade scale new cycles are created with (per a follow-up request
+// to make this real, not just cosmetic) — see the rating_scale default in
+// POST /cycles and rating-rules.js's updated Super 50 comment for how the
+// rest of the app was kept consistent with the wider 1-6 scale this
+// introduced.
 function NewCycleModal({ onClose, onCreated }) {
   const thisYear = new Date().getFullYear();
   const defaultFY = `FY${String(thisYear).slice(-2)}-${String(thisYear + 1).slice(-2)}`;
@@ -183,8 +183,8 @@ function NewCycleModal({ onClose, onCreated }) {
           </div>
           <div className="bg-navy-50 rounded-xl p-3 text-xs text-navy-500 space-y-1">
             <p className="flex items-center gap-1.5 font-semibold text-navy-600"><Info size={13} />Defaults applied</p>
-            <p><b>Rating scale:</b> 1 Needs Improvement · 2 Developing · 3 Meets Expectations · 4 Exceeds · 5 Outstanding</p>
-            <p><b>Bell curve:</b> 1 – 5% · 2 – 15% · 3 – 55% · 4 – 20% · 5 – 5%</p>
+            <p><b>Rating scale:</b> A+, A, B+, B, C, D</p>
+            <p><b>Bell curve:</b> A+ 5% · A 15% · B+ 35% · B 30% · C 10% · D 5%</p>
             <p className="text-navy-400">These can be adjusted after creation.</p>
           </div>
           {err && <p className="text-xs text-rose-600">{err}</p>}
