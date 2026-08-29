@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, Fragment } from 'react';
-import { Settings2, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Settings2, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { api } from '../utils/api';
 
 const ROLES = ['employee', 'manager', 'hod', 'hr', 'admin'];
@@ -129,19 +129,40 @@ export default function DirectoryPage() {
       {!rows ? <p className="text-sm text-navy-400">Loading…</p> : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 max-w-md">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 pointer-events-none" />
+            <div className="relative">
+              {/* Icon and clear-button are positioned relative to this wrapper,
+                 not the input itself, so the input can keep its normal .inp
+                 styling and just take extra padding for the icons. The !pl-10
+                 / !pr-9 use ! to override .inp's own px-3.5 without needing
+                 layer/specificity fussing — an overlap between the icon and
+                 the placeholder was exactly what a prior compact version got
+                 wrong. */}
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 pointer-events-none" />
               <input
                 type="text"
-                className="inp pl-9"
-                placeholder="Search by name, email, employee ID, department, or manager…"
+                className="inp w-80 !pl-10 !pr-9"
+                placeholder="Search employees…"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') setQuery(''); }}
+                title="Search across name, email, employee ID, department, and manager's email"
               />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-navy-400 hover:text-navy-700 p-1 rounded-lg hover:bg-navy-50 transition-colors"
+                  aria-label="Clear search"
+                  title="Clear search (Esc)"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
-            <p className="text-xs text-navy-400">
-              {displayedRows.length} of {rows.length} {rows.length === 1 ? 'employee' : 'employees'}
-              {query && ' (filtered)'}
+            <p className="text-xs text-navy-500">
+              <span className="font-semibold text-navy-700">{displayedRows.length}</span>
+              <span className="text-navy-400"> of {rows.length} {rows.length === 1 ? 'employee' : 'employees'}</span>
+              {query && <span className="text-brand-500 font-semibold"> · filtered</span>}
             </p>
           </div>
 
