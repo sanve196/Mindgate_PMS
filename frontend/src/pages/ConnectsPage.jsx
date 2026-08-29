@@ -12,10 +12,16 @@ export default function ConnectsPage() {
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
 
+  // Fix guide item #8: the sign-off action already existed, but nothing
+  // called out how many connects were still awaiting it — this makes that
+  // visible at a glance instead of requiring a scroll through the whole list.
+  const pendingCount = data.filter(cn => !cn.signed_off).length;
+
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold">Quarterly Connects</h2>
+        {pendingCount > 0 && <span className="chip bg-amber-100 text-amber-700">{pendingCount} awaiting sign-off</span>}
         <button className="btn-pri" onClick={() => setShowNew(v => !v)}><Plus size={13} className="inline mr-1" />Log a connect</button>
       </div>
       {showNew && <NewConnectForm onSaved={() => { setShowNew(false); load(); }} />}
@@ -30,16 +36,37 @@ export default function ConnectsPage() {
 function NewConnectForm({ onSaved }) {
   const [employeeId, setEmployeeId] = useState('');
   const [heldAt, setHeldAt] = useState(new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState('');
+  // Fix guide item #8 (BR-4.2): three separate fields instead of one
+  // "Achievements, blockers, feedback…" free-text box.
+  const [achievements, setAchievements] = useState('');
+  const [blockers, setBlockers] = useState('');
+  const [feedback, setFeedback] = useState('');
   const [team, setTeam] = useState(null);
+  const [kraOptions, setKraOptions] = useState([]);
+  const [kraIds, setKraIds] = useState([]);
   const [err, setErr] = useState(null);
   useEffect(() => { api('/pms/team/evaluations').then(r => setTeam(r.team || [])).catch(() => setTeam([])); }, []);
+
+  // Fetch the selected employee's current KRAs to link against, rather
+  // than the manager typing KRA references from memory.
+  useEffect(() => {
+    setKraIds([]);
+    if (!employeeId) { setKraOptions([]); return; }
+    api(`/pms/connects/kra-options/${employeeId}`).then(r => setKraOptions(r.kras || [])).catch(() => setKraOptions([]));
+  }, [employeeId]);
+
+  const toggleKra = (id) => setKraIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
 
   const save = async () => {
     setErr(null);
     if (!employeeId || !heldAt) { setErr('Employee and date are required.'); return; }
-    try { await api('/pms/connects', { method: 'POST', body: JSON.stringify({ employee_id: employeeId, held_at: heldAt, notes }) }); onSaved(); }
-    catch (e) { setErr(e.message); }
+    try {
+      await api('/pms/connects', {
+        method: 'POST',
+        body: JSON.stringify({ employee_id: employeeId, held_at: heldAt, achievements, blockers, feedback, kra_ids: kraIds }),
+      });
+      onSaved();
+    } catch (e) { setErr(e.message); }
   };
 
   return (
@@ -51,7 +78,24 @@ function NewConnectForm({ onSaved }) {
         </select>
         <input className="inp w-40" type="date" value={heldAt} onChange={e => setHeldAt(e.target.value)} />
       </div>
-      <textarea className="inp" rows={3} placeholder="Achievements, blockers, feedback…" value={notes} onChange={e => setNotes(e.target.value)} />
+      {employeeId && kraOptions.length > 0 && (
+        <div>
+          <label className="lbl">Link to KRA(s)</label>
+          <div className="flex flex-wrap gap-1.5">
+            {kraOptions.map(k => (
+              <button key={k.id} type="button"
+                className={`chip ${kraIds.includes(k.id) ? 'bg-brand-500 text-white' : 'bg-navy-50 text-navy-600'}`}
+                onClick={() => toggleKra(k.id)}>{k.title}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div><label className="lbl">Achievements</label>
+        <textarea className="inp" rows={2} placeholder="What went well since the last connect…" value={achievements} onChange={e => setAchievements(e.target.value)} /></div>
+      <div><label className="lbl">Blockers</label>
+        <textarea className="inp" rows={2} placeholder="Anything holding progress up…" value={blockers} onChange={e => setBlockers(e.target.value)} /></div>
+      <div><label className="lbl">Feedback</label>
+        <textarea className="inp" rows={2} placeholder="Feedback for the employee…" value={feedback} onChange={e => setFeedback(e.target.value)} /></div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
       <button className="btn-pri" onClick={save}>Save connect</button>
     </div>
@@ -86,7 +130,15 @@ function ConnectRow({ cn, reload }) {
           {cn.signed_off ? <CheckCircle2 size={12} /> : <Clock size={12} />}{cn.signed_off ? 'Signed off' : 'Pending sign-off'}
         </span>
       </div>
-      {cn.notes && <p className="text-xs text-navy-600">{cn.notes}</p>}
+      <div className="text-xs text-navy-600 space-y-1">
+        {cn.achievements && <p><b className="text-navy-500">Achievements:</b> {cn.achievements}</p>}
+        {cn.blockers && <p><b className="text-navy-500">Blockers:</b> {cn.blockers}</p>}
+        {cn.feedback && <p><b className="text-navy-500">Feedback:</b> {cn.feedback}</p>}
+        {!cn.achievements && !cn.blockers && !cn.feedback && cn.notes && <p>{cn.notes}</p>}
+      </div>
+      {Array.isArray(cn.kra_ids) && cn.kra_ids.length > 0 && (
+        <p className="text-[11px] text-navy-400">Linked to {cn.kra_ids.length} KRA{cn.kra_ids.length === 1 ? '' : 's'}</p>
+      )}
       <div className="flex gap-2">
         {!cn.signed_off && <button className="btn-sec" onClick={signOff}>Sign off</button>}
         <button className="btn-sec" disabled={busy} onClick={askInsights}><Sparkles size={12} className="inline mr-1 text-amber-500" />{busy ? 'Thinking…' : 'AI insights'}</button>

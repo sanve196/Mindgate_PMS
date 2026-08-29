@@ -5,6 +5,7 @@ import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
 import TeamEvalPage from './pages/TeamEvalPage';
+import TeamKraSheetsPage from './pages/TeamKraSheetsPage';
 import HodQueuePage from './pages/HodQueuePage';
 import CycleAdminPage from './pages/CycleAdminPage';
 import CalibrationPage from './pages/CalibrationPage';
@@ -35,6 +36,7 @@ const NAV = [
     { to: '/my/pulse-check', label: 'Pulse Check', icon: Heart },
   ]},
   { group: 'Team', items: [
+    { to: '/team/kra-sheets', label: 'Team KRA Sheets', icon: ClipboardList },
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
     { to: '/team/connects', label: 'Quarterly Connects', icon: MessageCircle },
     { to: '/hod', label: 'Delivery Head Review', icon: Landmark },
@@ -109,6 +111,7 @@ export default function App() {
             <Route path="/my/growth" element={<MyGrowthPage />} />
             <Route path="/my/annual-review" element={<AnnualReviewPage />} />
             <Route path="/my/pulse-check" element={<PulseCheckPage />} />
+            <Route path="/team/kra-sheets" element={<TeamKraSheetsPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
             <Route path="/team/connects" element={<ConnectsPage />} />
             <Route path="/hod" element={<HodQueuePage />} />

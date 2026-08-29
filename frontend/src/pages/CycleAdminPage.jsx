@@ -39,6 +39,15 @@ export default function CycleAdminPage() {
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
+  // Fix guide item #2: backend already supported cancel (POST .../phase
+  // with { cancel: true }, guarded by phase-machine's canCancel()) — this
+  // was purely a missing button, no server change needed.
+  const cancelCycle = async (c) => {
+    if (!confirm(`Cancel "${c.name}"? This cannot be undone — the cycle moves to Cancelled and can no longer be advanced.`)) return;
+    setErr(null);
+    try { await api(`/pms/cycles/${c.id}/phase`, { method: 'POST', body: JSON.stringify({ cancel: true }) }); load(); }
+    catch (e) { setErr(e.message); }
+  };
 
   if (err && !cycles) return <p className="text-sm text-rose-600">{err}</p>;
   if (!cycles) return <p className="text-sm text-navy-400">Loading…</p>;
@@ -80,6 +89,7 @@ export default function CycleAdminPage() {
                 {next && <button className="btn-pri" onClick={() => phase(c, next, false)}><ArrowRight size={13} className="inline mr-1" />Advance to {phaseLabel(next)}</button>}
                 {prev && <button className="btn-sec" onClick={() => phase(c, prev, true)}><RotateCcw size={13} className="inline mr-1" />Roll back to {phaseLabel(prev)}</button>}
                 {c.phase === 'publish' && <button className="btn-pri !bg-emerald-700" disabled={busy} onClick={publish}><Rocket size={13} className="inline mr-1" />Publish ratings</button>}
+                <button className="btn-sec !text-rose-600 !border-rose-200" onClick={() => cancelCycle(c)}><Trash2 size={13} className="inline mr-1" />Cancel cycle</button>
               </div>
             )}
           </div>

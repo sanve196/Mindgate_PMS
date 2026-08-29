@@ -531,4 +531,4 @@ router.post('/import', (req, res, next) => upload.single('file')(req, res, (err)
   } catch (e) { logger.error('employee import', { error: e.message }); res.status(500).json({ error: e.message }); }
 });
 
-module.exports = { router, validateEmployeeCsv, validateEmployeeXlsx, validateEmployeeRows, flexDate, parseCsv, detectFormat, loadEmployees };
+module.exports = { router, validateEmployeeCsv, validateEmployeeXlsx, validateEmployeeRows, flexDate, parseCsv, parseExcelBuffer, detectFormat, loadEmployees };

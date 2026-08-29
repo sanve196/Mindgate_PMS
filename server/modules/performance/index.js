@@ -19,6 +19,7 @@ const { notify } = require('../../core/notifications');
 const { requireConsent } = require('../../core/consent');
 const { isSuper50Eligible, computeWeightedRating } = require('./rating-rules');
 const { isConnectDue, shouldRemindAgain } = require('./connect-reminders');
+const { parseCsv, parseExcelBuffer, detectFormat } = require('../../core/employees');
 const pm = require('./phase-machine');
 
 const router = express.Router();
@@ -213,6 +214,23 @@ router.post('/team/kra-sheets/:sheetId/decide', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Fix guide item #5: managers had a list of pending sheets (above) but no
+// way to see the actual KRA line items before approving/returning one —
+// GET /team/kra-sheets only ever returned counts (kra_count/total_weight).
+// This mirrors GET /my/kra-sheet's shape (sheet + kras + weights) but
+// scoped to a manager viewing one of their reports' sheets.
+router.get('/team/kra-sheets/:sheetId/kras', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const s = (await db.query(`SELECT * FROM pms.kra_sheets WHERE id=$1 AND tenant_id=$2`, [req.params.sheetId, T(req)])).rows[0];
+    if (!s) return res.status(404).json({ error: 'sheet not found' });
+    if (s.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')))
+      return res.status(403).json({ error: 'Not your report' });
+    const kras = (await db.query(`SELECT * FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [s.id])).rows;
+    res.json({ sheet: s, kras, weights: pm.weightsValid(kras) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------- HR: org-wide KRA overview + enter-on-behalf — BR-1.1/1.4 -
 // FOUND MISSING 28-Aug-2026: /team/kra-sheets (above) is manager-scoped
 // (WHERE manager_id=req.user.id) — there was no HR-wide view across every
@@ -315,6 +333,146 @@ router.post('/hr/kra-sheet/:employeeId/submit', async (req, res) => {
     audit(req, 'KRA_SUBMITTED_ON_BEHALF', c.id, req.params.employeeId, { kras: kras.length });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------- HR: bulk KRA upload — BR-1.1 ------------------------------
+// "A bulk Excel upload option must be made available so as to avoid manual
+// entry work in PMS." The existing bulk importer (core/employees.js) only
+// covers employee MASTER data (name/email/manager/etc) — this is the
+// missing piece for KRA CONTENT itself. Deliberately reuses the exact same
+// parsing/validation/dry-run pattern (same shared parseCsv/parseExcelBuffer,
+// same header-normalisation, same per-row line-numbered errors, same
+// ?commit=1-required-to-load default) so behaviour is consistent and
+// familiar to whoever already uses the employee importer.
+//
+// Columns (header row, case-insensitive, order-free):
+//   employee_email, kra_title, weight, description, measures
+// Rows are grouped by employee_email; each employee's KRA weights must sum
+// to 100 (same weightsValid() rule as the single-entry route) before ANY
+// row commits — a bad file for one employee should not partially load.
+const KRA_BULK_REQUIRED = ['employee_email', 'kra_title', 'weight'];
+const KRA_BULK_KNOWN = ['employee_email', 'kra_title', 'weight', 'description', 'measures'];
+
+function validateKraBulkRows(rows, knownEmails) {
+  if (!rows.length) return { ok: false, fatal: 'Empty file', rows: [], errors: [], warnings: [] };
+  const header = rows[0].map((h) => String(h).trim().toLowerCase().replace(/\s+/g, '_'));
+  const missing = KRA_BULK_REQUIRED.filter((c) => !header.includes(c));
+  if (missing.length) return { ok: false, fatal: `Missing required column(s): ${missing.join(', ')}`, rows: [], errors: [], warnings: [] };
+  const unknown = header.filter((h) => !KRA_BULK_KNOWN.includes(h));
+  const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+  const out = []; const errors = []; const warnings = [];
+
+  rows.slice(1).forEach((r, n) => {
+    const line = n + 2; // 1-based + header
+    const get = (c) => (idx[c] != null ? String(r[idx[c]] ?? '').trim() : '');
+    const rec = {
+      line,
+      employee_email: get('employee_email').toLowerCase(),
+      kra_title: get('kra_title'),
+      weight: Number(get('weight')),
+      description: get('description') || null,
+      measures: get('measures') || null,
+    };
+    if (!rec.employee_email) errors.push({ line, error: 'employee_email is empty' });
+    else if (!knownEmails.has(rec.employee_email)) errors.push({ line, error: `employee_email "${rec.employee_email}" not found among active employees` });
+    if (!rec.kra_title) errors.push({ line, error: 'kra_title is empty' });
+    if (!Number.isFinite(rec.weight) || rec.weight <= 0) errors.push({ line, error: `weight must be a positive number (got "${get('weight')}")` });
+    out.push(rec);
+  });
+
+  if (unknown.length) warnings.push({ line: 1, warning: `ignored unknown column(s): ${unknown.join(', ')}` });
+
+  // Per-employee weight-sum check — same rule PUT /my/kra-sheet/kras enforces
+  // at submit time, checked here up front so a bad file fails as a whole.
+  const byEmployee = new Map();
+  for (const r of out) {
+    if (!r.employee_email) continue;
+    if (!byEmployee.has(r.employee_email)) byEmployee.set(r.employee_email, []);
+    byEmployee.get(r.employee_email).push(r);
+  }
+  for (const [email, kras] of byEmployee) {
+    const check = pm.weightsValid(kras);
+    if (!check.ok) errors.push({ line: kras[0].line, error: `${email}: KRA weights must total 100 (currently ${check.total})` });
+  }
+
+  return {
+    ok: errors.length === 0, fatal: null, rows: out, errors, warnings,
+    summary: { total_rows: out.length, employees: byEmployee.size, errors: errors.length, warnings: warnings.length },
+  };
+}
+
+const kraUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!/\.(csv|xlsx|xls)$/i.test(file.originalname || '')) return cb(new Error('Only .csv, .xlsx, or .xls files are accepted'));
+    cb(null, true);
+  },
+});
+
+// POST /pms/hr/kra-sheet/bulk-upload (multipart file) ?commit=1 to load; dry run by default.
+router.post('/hr/kra-sheet/bulk-upload', (req, res, next) => kraUpload.single('file')(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.message });
+  next();
+}), async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    if (!req.file) return res.status(400).json({ error: 'file required (multipart field "file")' });
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'kra_edit')) return res.status(409).json({ error: `KRA editing is not open (phase: ${c ? c.phase : 'none'})` });
+
+    const format = detectFormat(req.file);
+    if (format === 'xls-legacy') {
+      return res.status(400).json({ error: 'Legacy .xls files are not supported — please re-save the file as .xlsx (File > Save As > Excel Workbook) and upload again.' });
+    }
+
+    const employees = (await db.query(`SELECT LOWER(email) AS email, id, manager_id FROM core.employees WHERE tenant_id=$1 AND status='active'`, [T(req)])).rows;
+    const knownEmails = new Set(employees.map((e) => e.email));
+    const empByEmail = new Map(employees.map((e) => [e.email, e]));
+
+    const parsedRows = format === 'xlsx' ? await parseExcelBuffer(req.file.buffer) : parseCsv(req.file.buffer.toString('utf8'));
+    const report = validateKraBulkRows(parsedRows, knownEmails);
+    if (report.fatal) return res.status(400).json({ error: report.fatal });
+    const commit = req.query.commit === '1';
+    if (!report.ok) return res.status(422).json({ ok: false, committed: false, ...report });
+    if (!commit) return res.json({ ok: true, committed: false, note: 'Dry run — pass ?commit=1 to load.', ...report });
+
+    const byEmployee = new Map();
+    for (const r of report.rows) {
+      if (!byEmployee.has(r.employee_email)) byEmployee.set(r.employee_email, []);
+      byEmployee.get(r.employee_email).push(r);
+    }
+    const skipped = [];
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      for (const [email, kras] of byEmployee) {
+        const emp = empByEmail.get(email);
+        let s = (await client.query(`SELECT * FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, emp.id])).rows[0];
+        if (!s) {
+          s = (await client.query(
+            `INSERT INTO pms.kra_sheets (tenant_id, cycle_id, employee_id, manager_id) VALUES ($1,$2,$3,$4) RETURNING *`,
+            [T(req), c.id, emp.id, emp.manager_id])).rows[0];
+        } else if (s.status === 'approved') {
+          skipped.push({ email, reason: 'sheet already approved — return it for edits first' });
+          continue; // don't silently overwrite an already-approved sheet
+        }
+        await client.query(`DELETE FROM pms.kras WHERE sheet_id=$1`, [s.id]);
+        let i = 0;
+        for (const k of kras) {
+          await client.query(
+            `INSERT INTO pms.kras (tenant_id, sheet_id, title, description, weight, measures, sort_order)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [T(req), s.id, k.kra_title, k.description, k.weight, k.measures, (i += 10)]);
+        }
+        await client.query(`UPDATE pms.kra_sheets SET status='draft', updated_at=now() WHERE id=$1`, [s.id]);
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+
+    audit(req, 'KRA_BULK_UPLOAD', c.id, null, report.summary);
+    res.json({ ok: true, committed: true, employees_loaded: byEmployee.size - skipped.length, skipped, warnings: report.warnings, summary: report.summary });
+  } catch (e) { logger.error('kra bulk upload', { error: e.message }); res.status(500).json({ error: e.message }); }
 });
 
 // ---------------- Development Plan (Org IDP) — BR-2.1/2.2/2.3 --------------
@@ -1163,13 +1321,19 @@ router.get('/my/rating', async (req, res) => {
 router.post('/connects', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
-    const { employee_id, held_at, notes, kra_ids, meeting_based } = req.body || {};
+    // Fix guide item #8 (BR-4.2): achievements/blockers/feedback as their
+    // own fields, not one free-text blob. `notes` is still accepted for
+    // backward compatibility with anything already calling this route, but
+    // new callers (the updated ConnectsPage) send the three fields instead.
+    const { employee_id, held_at, notes, achievements, blockers, feedback, kra_ids, meeting_based } = req.body || {};
     if (!employee_id || !held_at) return res.status(400).json({ error: 'employee_id and held_at required' });
     if (meeting_based) await requireConsent(T(req), employee_id);
     await db.query(
-      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, notes, kra_ids, meeting_based)
-       VALUES ($1,$2,$3,$4,$5,COALESCE($6::uuid[],'{}'::uuid[]),$7)`,
-      [T(req), req.user.id, employee_id, held_at, notes || null, Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based]);
+      `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, notes, achievements, blockers, feedback, kra_ids, meeting_based)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::uuid[],'{}'::uuid[]),$10)`,
+      [T(req), req.user.id, employee_id, held_at, notes || null, achievements || null, blockers || null, feedback || null,
+        Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based]);
+    audit(req, 'CONNECT_LOGGED', null, employee_id, { held_at });
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1184,6 +1348,25 @@ router.get('/connects', async (req, res) => {
         ORDER BY cn.held_at DESC LIMIT 100`,
       mine ? [T(req), req.user.id, mine] : [T(req), req.user.id]);
     res.json({ connects: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Fix guide item #8: lets the "Log a connect" form fetch the employee's
+// current KRAs to link against (kra_ids), instead of the manager typing
+// KRA references from memory. Manager-scoped the same way team/kra-sheets
+// is — only for one's own reports (or HR/admin).
+router.get('/connects/kra-options/:employeeId', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ kras: [] });
+    const kras = (await db.query(
+      `SELECT k.id, k.title FROM pms.kras k JOIN pms.kra_sheets s ON s.id=k.sheet_id
+        WHERE s.cycle_id=$1 AND s.employee_id=$2 ORDER BY k.sort_order`, [c.id, req.params.employeeId])).rows;
+    res.json({ kras });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

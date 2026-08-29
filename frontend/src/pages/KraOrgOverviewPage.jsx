@@ -15,8 +15,25 @@ export default function KraOrgOverviewPage() {
   const [q, setQ] = useState('');
   const [err, setErr] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  // Fix guide item #4 (BR-1.1): bulk KRA upload, alongside the existing
+  // single-employee "enter on behalf" already below. Mirrors DirectoryPage's
+  // employee-import UI/flow exactly (same dry-run-first pattern) for
+  // familiarity, but posts to the new /hr/kra-sheet/bulk-upload endpoint.
+  const [kraFile, setKraFile] = useState(null);
+  const [kraReport, setKraReport] = useState(null);
+  const [kraErr, setKraErr] = useState(null);
   const load = (query) => api(`/pms/kra/org-overview${query ? `?q=${encodeURIComponent(query)}` : ''}`).then(setData).catch(e => setErr(e.message));
   useEffect(() => { load(); }, []);
+
+  const sendKraBulk = async (commit) => {
+    setKraErr(null);
+    const fd = new FormData(); fd.append('file', kraFile);
+    try {
+      const r = await api(`/pms/hr/kra-sheet/bulk-upload${commit ? '?commit=1' : ''}`, { method: 'POST', body: fd });
+      setKraReport(r);
+      if (commit) load(q);
+    } catch (e) { setKraErr(e.message); setKraReport(e.data && e.data.errors ? e.data : null); }
+  };
 
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
@@ -29,6 +46,25 @@ export default function KraOrgOverviewPage() {
       <div>
         <h2 className="text-lg font-bold">Org-wide KRA Overview</h2>
         <p className="text-xs text-navy-400">{data.cycle.name} · every active employee's KRA status, with search and the ability to enter KRAs on someone's behalf.</p>
+      </div>
+      <div className="card p-4 space-y-2">
+        <p className="lbl">Bulk KRA upload — CSV or Excel (.xlsx), one row per KRA, dry run first (BR-1.1)</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="file" accept=".csv,.xlsx,.xls" onChange={e => { setKraFile(e.target.files[0]); setKraReport(null); }} className="text-xs" />
+          <button className="btn-sec" disabled={!kraFile} onClick={() => sendKraBulk(false)}>Validate</button>
+          <button className="btn-pri" disabled={!kraFile || !(kraReport && kraReport.ok && !kraReport.committed)} onClick={() => sendKraBulk(true)}>Commit load</button>
+        </div>
+        <p className="text-[11px] text-navy-400">Columns: employee_email, kra_title, weight, description, measures. Each employee's weights must total 100. Loaded KRAs land as Draft — the employee (or HR) still needs to Submit.</p>
+        {kraErr && <p className="text-xs text-rose-600">{kraErr}</p>}
+        {kraReport && (
+          <div className="text-xs space-y-1">
+            <p className="font-semibold">{kraReport.committed ? 'LOADED' : kraReport.ok ? 'VALID — commit to load' : 'REJECTED'}
+              {kraReport.summary && ` · ${kraReport.summary.total_rows} rows · ${kraReport.summary.employees} employees · ${kraReport.summary.errors} errors · ${kraReport.summary.warnings} warnings`}</p>
+            {(kraReport.errors || []).map((e, i) => <p key={i} className="text-rose-600">line {e.line}: {e.error}</p>)}
+            {(kraReport.warnings || []).map((w, i) => <p key={i} className="text-amber-700">line {w.line}: {w.warning}</p>)}
+            {(kraReport.skipped || []).map((s, i) => <p key={i} className="text-amber-700">skipped {s.email}: {s.reason}</p>)}
+          </div>
+        )}
       </div>
       <div className="flex gap-3 flex-wrap">
         {COUNTER_ORDER.map(k => (
