@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const HAS_DB = !!process.env.DATABASE_URL;
 const skip = !HAS_DB && 'DATABASE_URL not set — see file header';
 
-let db, server, base, empId;
+let db, server, base, empId, strangerId;
 
 before(async () => {
   if (!HAS_DB) return;
@@ -28,6 +28,7 @@ before(async () => {
   const mgr = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'SO Mgr','so-mgr@x.com','active') RETURNING id`, [t.id])).rows[0];
   const emp = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status, manager_id) VALUES ($1,'SO Emp','so-emp@x.com','active',$2) RETURNING id`, [t.id, mgr.id])).rows[0];
   const stranger = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'SO Stranger','so-stranger@x.com','active') RETURNING id`, [t.id])).rows[0];
+  strangerId = stranger.id;
   empId = emp.id;
   await db.query(`INSERT INTO core.user_roles (tenant_id, email, role) VALUES ($1,'so-mgr@x.com','manager')`, [t.id]);
   const hash = await bcrypt.hash('pass', 10);
@@ -177,4 +178,44 @@ test('connect cadence: computes expected/logged/next-due for a specific report, 
 
   const blocked = await api(`/pms/connects/cadence/${empId}`, strangerAuth.token);
   assert.equal(blocked.status, 403);
+});
+
+// Requested: an employee should be able to log their own 1-on-1
+// discussion — previously POST /connects required pms_team_eval
+// unconditionally, so a plain employee had no way to satisfy "Employee
+// and date are required" at all (the "Select report" dropdown came from
+// a pms_team_eval-gated endpoint and was always empty for them).
+test('connect: an employee can self-log a connect without pms_team_eval, correctly attributed to their real manager', { skip }, async () => {
+  const empAuth = await login('so-emp@x.com');
+  const created = await api('/pms/connects', empAuth.token, {
+    method: 'POST',
+    body: JSON.stringify({ employee_id: empId, held_at: '2026-12-01', topic: 'Self-logged check-in', discussion_notes: 'Discussed my own progress with my manager.' }),
+  });
+  assert.equal(created.status, 200, 'no special permission required to log about yourself');
+
+  const mgrAuth = await login('so-mgr@x.com');
+  const list = await api('/pms/connects', mgrAuth.token);
+  const cn = list.body.connects.find((c) => c.topic === 'Self-logged check-in');
+  assert.ok(cn, 'the self-logged connect shows up in the real manager\'s list too');
+  assert.equal(cn.logged_by_id, empId, 'logged_by_id records who actually submitted it');
+});
+
+test('connect: self-logging fails cleanly for someone with no manager on record', { skip }, async () => {
+  const strangerAuth = await login('so-stranger@x.com'); // has no manager_id set
+  const created = await api('/pms/connects', strangerAuth.token, {
+    method: 'POST',
+    body: JSON.stringify({ employee_id: strangerId, held_at: '2026-12-01', topic: 'No manager' }),
+  });
+  assert.equal(created.status, 422);
+  assert.match(created.body.error, /no manager on record/);
+});
+
+// Requested: an employee should be able to see AI insights on their own
+// logged connects, not just their manager. Only the pre-AI-call guard is
+// tested here (no ANTHROPIC_API_KEY in this sandbox), same convention as
+// connect-insights.test.js.
+test('connect-insights: an employee can request insights about themselves without pms_team_eval', { skip }, async () => {
+  const empAuth = await login('so-emp@x.com');
+  const r = await api('/agentic/connect-insights', empAuth.token, { method: 'POST', body: JSON.stringify({ employee_id: empId }) });
+  assert.notEqual(r.status, 403, 'self-view must not be blocked by the pms_team_eval guard');
 });

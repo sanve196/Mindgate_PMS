@@ -228,14 +228,21 @@ router.get('/drafts', async (req, res) => {
 // are now included in the input alongside the discussion narrative, since
 // those are exactly the signal a progress/performance read should draw
 // on, not just the free-text discussion.
+// UPDATED again: previously required pms_team_eval unconditionally, so an
+// employee could never see AI insights about their OWN logged connects —
+// only their manager could. Per a direct request ("employee should have
+// AI insight option... after saving"), self-view is now allowed for
+// anyone looking at their own employee_id; viewing someone ELSE's still
+// requires pms_team_eval + being their manager (or pms_admin), unchanged.
 router.post('/connect-insights', async (req, res) => {
   try {
-    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const { employee_id } = req.body || {};
     if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+    const isSelf = employee_id === req.user.id;
+    if (!isSelf && !(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const emp = (await db.query(`SELECT id, name, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [employee_id, T(req)])).rows[0];
     if (!emp) return res.status(404).json({ error: 'employee not found' });
-    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    if (!isSelf && emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const connects = (await db.query(
       `SELECT cn.held_at, COALESCE(cn.discussion_notes, cn.notes) AS notes, cn.achievements, cn.blockers, cn.feedback, cn.kra_ids
          FROM pms.connects cn

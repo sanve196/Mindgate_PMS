@@ -6,8 +6,18 @@ export default function ConnectsPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [showNew, setShowNew] = useState(false);
-  const load = () => api('/pms/connects').then(r => setData(r.connects)).catch(e => setErr(e.message));
-  useEffect(() => { load(); }, []);
+  const [me, setMe] = useState(null);
+  const [team, setTeam] = useState(null);
+  // Manager-side "select report" filter, per a direct request — lets a
+  // manager narrow the list to one report's connects to review/sign off,
+  // instead of scrolling the whole flat list. Empty = show everyone's.
+  const [filterEmployeeId, setFilterEmployeeId] = useState('');
+  const load = (employeeId) => api(`/pms/connects${employeeId ? `?employee_id=${employeeId}` : ''}`).then(r => setData(r.connects)).catch(e => setErr(e.message));
+  useEffect(() => {
+    load();
+    api('/me').then(r => setMe(r.user)).catch(() => setMe(null));
+    api('/pms/team/evaluations').then(r => setTeam(r.team || [])).catch(() => setTeam([]));
+  }, []);
 
   if (err) return <p className="text-sm text-rose-600">{err}</p>;
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
@@ -24,16 +34,25 @@ export default function ConnectsPage() {
         {pendingCount > 0 && <span className="chip bg-amber-100 text-amber-700">{pendingCount} awaiting sign-off</span>}
         <button className="btn-pri" onClick={() => setShowNew(v => !v)}><Plus size={13} className="inline mr-1" />Log a connect</button>
       </div>
-      {showNew && <NewConnectForm onSaved={() => { setShowNew(false); load(); }} />}
+      {showNew && <NewConnectForm me={me} team={team} onSaved={() => { setShowNew(false); load(filterEmployeeId); }} />}
+      {team && team.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="lbl mb-0">Select report</label>
+          <select className="inp w-auto" value={filterEmployeeId} onChange={e => { setFilterEmployeeId(e.target.value); load(e.target.value); }}>
+            <option value="">All reports</option>
+            {team.map(t => <option key={t.employee_id} value={t.employee_id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
       {!data.length && <div className="card p-8 text-center text-sm text-navy-400">No connects logged yet.</div>}
       <div className="space-y-2">
-        {data.map(cn => <ConnectRow key={cn.id} cn={cn} reload={load} />)}
+        {data.map(cn => <ConnectRow key={cn.id} cn={cn} me={me} reload={() => load(filterEmployeeId)} />)}
       </div>
     </div>
   );
 }
 
-function NewConnectForm({ onSaved }) {
+function NewConnectForm({ me, team, onSaved }) {
   const [employeeId, setEmployeeId] = useState('');
   const [heldAt, setHeldAt] = useState(new Date().toISOString().slice(0, 10));
   const [durationMin, setDurationMin] = useState('30');
@@ -46,7 +65,6 @@ function NewConnectForm({ onSaved }) {
   const [achievements, setAchievements] = useState('');
   const [blockers, setBlockers] = useState('');
   const [feedback, setFeedback] = useState('');
-  const [team, setTeam] = useState(null);
   const [kraOptions, setKraOptions] = useState([]);
   const [kraIds, setKraIds] = useState([]);
   // "Connect Cadence / Progress this cycle / Next due" header, per the
@@ -56,7 +74,19 @@ function NewConnectForm({ onSaved }) {
   // computeCadenceProgress.
   const [cadence, setCadence] = useState(null);
   const [err, setErr] = useState(null);
-  useEffect(() => { api('/pms/team/evaluations').then(r => setTeam(r.team || [])).catch(() => setTeam([])); }, []);
+
+  // Previously "Select report" only ever listed direct reports (from
+  // GET /team/evaluations, itself pms_team_eval-gated) — an employee with
+  // no reports of their own saw an empty dropdown and could never
+  // actually select anyone, hence "Employee and date required" with no
+  // way to fix it. "Myself" is now always the first option, so anyone can
+  // log their own 1-on-1; direct reports (if any) follow. With no reports
+  // at all, self is selected automatically rather than making someone
+  // choose from a list of one.
+  useEffect(() => {
+    if (!me) return;
+    if (!team || !team.length) setEmployeeId(me.id);
+  }, [me, team]);
 
   useEffect(() => {
     setKraIds([]); setCadence(null);
@@ -87,6 +117,7 @@ function NewConnectForm({ onSaved }) {
       <div className="grid sm:grid-cols-3 gap-2">
         <select className="inp sm:col-span-1" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
           <option value="">Select report…</option>
+          {me && <option value={me.id}>Myself ({me.name})</option>}
           {(team || []).map(t => <option key={t.employee_id} value={t.employee_id}>{t.name}</option>)}
         </select>
         <div>
@@ -157,7 +188,7 @@ function NewConnectForm({ onSaved }) {
   );
 }
 
-function ConnectRow({ cn, reload }) {
+function ConnectRow({ cn, me, reload }) {
   const [insight, setInsight] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -183,6 +214,7 @@ function ConnectRow({ cn, reload }) {
             {new Date(cn.held_at).toLocaleDateString()}
             {cn.duration_min != null && ` · ${cn.duration_min} min`}
             {cn.topic && ` · ${cn.topic}`}
+            {me && cn.logged_by_id && ` · logged by ${cn.logged_by_id === me.id ? 'you' : (cn.logged_by_id === cn.employee_id ? cn.employee_name : cn.manager_name)}`}
           </p>
         </div>
         <span className={`chip flex items-center gap-1 ${cn.signed_off ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -200,7 +232,7 @@ function ConnectRow({ cn, reload }) {
         <p className="text-[11px] text-navy-400">Linked to {cn.kra_ids.length} KRA{cn.kra_ids.length === 1 ? '' : 's'}</p>
       )}
       <div className="flex gap-2">
-        {!cn.signed_off && <button className="btn-sec" onClick={signOff}>Sign off</button>}
+        {!cn.signed_off && (!me || me.id === cn.manager_id) && <button className="btn-sec" onClick={signOff}>Sign off</button>}
         <button className="btn-sec" disabled={busy} onClick={askInsights}><Sparkles size={12} className="inline mr-1 text-amber-500" />{busy ? 'Thinking…' : 'AI insights'}</button>
       </div>
       {insight && <AiInsightsPanel insight={insight} onRefresh={askInsights} busy={busy} />}

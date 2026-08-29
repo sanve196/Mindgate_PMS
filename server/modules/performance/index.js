@@ -1375,21 +1375,38 @@ router.get('/my/rating', async (req, res) => {
 // recorded/transcribed on the employee's behalf in that case.
 router.post('/connects', async (req, res) => {
   try {
-    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     // Fix guide item #8 (BR-4.2): achievements/blockers/feedback as their
     // own fields, not one free-text blob. `notes` is still accepted for
     // backward compatibility with anything already calling this route, but
     // new callers (the updated ConnectsPage) send the three fields instead.
-    // duration_min/topic/discussion_notes added per a follow-up request:
-    // the manager logs what was actually discussed, and achievements/
-    // blockers/feedback are meant to be DERIVED from it (via
-    // /agentic/connect-extract) rather than typed from scratch.
+    // duration_min/topic/discussion_notes added per a follow-up request.
     // action_items (migration 018): optional list built up in the form
     // before saving, inserted in the same transaction as the connect
     // itself so a partial save (connect with no items, or items with no
-    // connect) can't happen.
+    // connect) can't happen. logged_by_id (migration 019) records who
+    // actually submitted this — see the self-logging note below.
     const { employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based, action_items } = req.body || {};
     if (!employee_id || !held_at) return res.status(400).json({ error: 'employee_id and held_at required' });
+
+    // Previously this route required pms_team_eval unconditionally — an
+    // employee logging their OWN 1-on-1 had no way to do so (the "Select
+    // report" dropdown is empty for anyone without direct reports, since
+    // it comes from GET /team/evaluations, which is itself pms_team_eval-
+    // gated), so an employee always hit "Employee and date required" with
+    // no way to satisfy it. Fixed: logging about YOURSELF needs no special
+    // permission; logging on someone ELSE's behalf still requires
+    // pms_team_eval, same as before.
+    const isSelf = employee_id === req.user.id;
+    let managerId;
+    if (isSelf) {
+      const emp = (await db.query(`SELECT manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.user.id, T(req)])).rows[0];
+      managerId = emp ? emp.manager_id : null;
+      if (!managerId) return res.status(422).json({ error: 'You have no manager on record — ask HR to set one before logging a connect.' });
+    } else {
+      if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+      managerId = req.user.id;
+    }
+
     if (meeting_based) await requireConsent(T(req), employee_id);
     const items = Array.isArray(action_items) ? action_items.filter((i) => i && String(i.description || '').trim()) : [];
 
@@ -1398,11 +1415,11 @@ router.post('/connects', async (req, res) => {
     try {
       await client.query('BEGIN');
       const cn = (await client.query(
-        `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::uuid[],'{}'::uuid[]),$13) RETURNING id`,
-        [T(req), req.user.id, employee_id, held_at, duration_min != null ? Number(duration_min) : null, topic || null, discussion_notes || null,
+        `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, duration_min, topic, discussion_notes, notes, achievements, blockers, feedback, kra_ids, meeting_based, logged_by_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::uuid[],'{}'::uuid[]),$13,$14) RETURNING id`,
+        [T(req), managerId, employee_id, held_at, duration_min != null ? Number(duration_min) : null, topic || null, discussion_notes || null,
           notes || null, achievements || null, blockers || null, feedback || null,
-          Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based])).rows[0];
+          Array.isArray(kra_ids) ? kra_ids : null, !!meeting_based, req.user.id])).rows[0];
       connectId = cn.id;
       for (const item of items) {
         await client.query(
@@ -1412,7 +1429,8 @@ router.post('/connects', async (req, res) => {
       await client.query('COMMIT');
     } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
 
-    audit(req, 'CONNECT_LOGGED', null, employee_id, { held_at, action_items: items.length });
+    audit(req, 'CONNECT_LOGGED', null, employee_id, { held_at, action_items: items.length, self_logged: isSelf });
+    if (isSelf) await notify(T(req), managerId, 'connect_logged_by_report', `${req.user.name} logged a 1-on-1 discussion for your sign-off`, null, '/pms/team/connects');
     res.json({ ok: true, id: connectId });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1457,10 +1475,11 @@ router.put('/connects/:id/action-items/:itemId', async (req, res) => {
 // back to a full year if the cycle has no opens_at/closes_at set).
 router.get('/connects/cadence/:employeeId', async (req, res) => {
   try {
-    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const isSelf = req.params.employeeId === req.user.id;
+    if (!isSelf && !(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
     if (!emp) return res.status(404).json({ error: 'employee not found' });
-    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    if (!isSelf && emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const c = await activeCycle(T(req));
     const cycleStart = c && c.opens_at ? new Date(c.opens_at) : null;
     const cycleEnd = c && c.closes_at ? new Date(c.closes_at) : null;
@@ -1485,10 +1504,11 @@ router.get('/connects/cadence/:employeeId', async (req, res) => {
 // is — only for one's own reports (or HR/admin).
 router.get('/connects/kra-options/:employeeId', async (req, res) => {
   try {
-    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const isSelf = req.params.employeeId === req.user.id;
+    if (!isSelf && !(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
     if (!emp) return res.status(404).json({ error: 'employee not found' });
-    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    if (!isSelf && emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const c = await activeCycle(T(req));
     if (!c) return res.json({ kras: [] });
     const kras = (await db.query(
