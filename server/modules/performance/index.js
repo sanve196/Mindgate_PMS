@@ -1616,7 +1616,15 @@ async function buildAnnualReviewSummary(tenantId, employeeId, cycleId) {
   const careerPath = (await db.query(`SELECT target_role, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [tenantId, employeeId])).rows[0];
 
   const params = (await db.query(`SELECT id, name, weight_pct FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [tenantId])).rows;
-  const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows;
+  // scored_by_role='manager' — this section is explicitly the manager's
+  // scoring progress (the frontend labels it "manager scoring in
+  // progress"), which is what feeds the OFFICIAL weighted rating. Without
+  // this filter, once an employee also self-scores the same parameters
+  // (added in a later round), this query could return either party's
+  // score unpredictably for the same parameter_id, depending on row
+  // order — found during a manual BRD-vs-code review, fixed here before
+  // it was ever actually hit in practice.
+  const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='manager'`, [tenantId, cycleId, employeeId])).rows;
   const scoreMap = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
   const weighted = computeWeightedRating(params, scoreMap);
 

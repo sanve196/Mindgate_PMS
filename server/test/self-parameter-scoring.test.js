@@ -110,6 +110,27 @@ test('self-scores and manager-scores coexist independently for the same paramete
   assert.equal(empView.body.scores[paramIds[0]], 5, 'employee\'s own self-score is untouched by the manager\'s scoring');
 });
 
+// Found during a manual BRD-vs-code review (BR-6.1/6.2/6.3): the Annual
+// Review consolidation screen's parameter_scores section is explicitly
+// labelled "manager scoring in progress" in the UI — it must show the
+// MANAGER's scores specifically, not whichever of self/manager happens
+// to come back first from an unfiltered query. Both self (5, 3) and
+// manager (2, 2) scores exist for these two parameters at this point in
+// the suite, from the tests above — exactly the condition that exposed
+// the bug.
+test('Annual Review summary shows the manager\'s scores specifically, not a mix with the employee\'s self-scores', { skip }, async () => {
+  const empAuth = await login('sps-emp@x.com');
+  const mine = await api('/pms/my/annual-review', empAuth.token);
+  assert.equal(mine.status, 200);
+  assert.equal(mine.body.parameter_scores.scores[paramIds[0]], 2, 'the manager\'s score (2), not the employee\'s own self-score (5)');
+  assert.equal(mine.body.parameter_scores.scores[paramIds[1]], 2);
+
+  const mgrAuth = await login('sps-mgr@x.com');
+  const team = await api(`/pms/team/annual-review/${empId}`, mgrAuth.token);
+  assert.equal(team.status, 200);
+  assert.equal(team.body.parameter_scores.scores[paramIds[0]], 2, 'same fix applies to the manager/HOD-facing view');
+});
+
 test('submitting self-appraisal on an annual cycle requires the 7 parameters to be complete', { skip }, async () => {
   const t = (await db.query(`SELECT tenant_id FROM core.employees WHERE id=$1`, [empId])).rows[0].tenant_id;
   const fresh = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'SPS Fresh','sps-fresh@x.com','active') RETURNING id`, [t])).rows[0];
