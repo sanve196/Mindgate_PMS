@@ -11,7 +11,24 @@
 // Path stay open. This phase is that missing middle step: KRA is locked
 // the moment the cycle advances past kra_open, and Development Plan +
 // Career Path only become editable once it reaches growth_planning.
-const ORDER = ['draft', 'kra_open', 'growth_planning', 'self_appraisal', 'manager_eval', 'hod_eval', 'calibration', 'publish', 'closed'];
+// mid_year_review added per an explicit request, with a reference
+// screenshot: a checkpoint phase between Growth Planning and
+// Self-Appraisal, gating "should not open before growth plan is
+// completed" and "editable only once the cycle moves into this phase."
+// Its own action names (midyear_self_edit etc.), NOT shared with
+// self_appraisal/manager_eval — those two tables (pms.self_appraisals /
+// pms.manager_evaluations) permanently lock the moment either party signs
+// off, with no phase awareness in that check. Reusing them here would
+// mean signing off the mid-year checkpoint permanently locks the SAME
+// cycle's real end-of-year self-appraisal too, months before it's even
+// supposed to open — pms.midyear_checkins (migration 020) is a separate
+// table specifically to avoid that collision.
+// This is a distinct concept from the pre-existing, separate
+// `cycle_type='midyear'` mechanism (a whole separate CYCLE going through
+// this same phase machine end to end) — this is a PHASE inside any
+// cycle's own timeline (annual or midyear), named similarly because the
+// request used that name.
+const ORDER = ['draft', 'kra_open', 'growth_planning', 'mid_year_review', 'self_appraisal', 'manager_eval', 'hod_eval', 'calibration', 'publish', 'closed'];
 
 function canAdvance(from, to) {
   const i = ORDER.indexOf(from), j = ORDER.indexOf(to);
@@ -42,6 +59,7 @@ function canCancel(from) {
 const ALLOWS = {
   kra_open:        ['kra_edit', 'kra_submit', 'kra_decide'],
   growth_planning: ['devplan_edit', 'devplan_submit', 'devplan_decide', 'career_edit'],
+  mid_year_review: ['midyear_self_edit', 'midyear_self_submit', 'midyear_manager_edit', 'midyear_manager_submit'],
   self_appraisal:  ['self_edit', 'self_submit'],
   manager_eval:    ['manager_edit', 'manager_submit'],
   hod_eval:        ['hod_edit', 'hod_submit'],

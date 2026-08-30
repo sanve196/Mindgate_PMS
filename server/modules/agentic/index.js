@@ -62,6 +62,61 @@ Respond ONLY with JSON:
   } catch (e) { fail(res, e); }
 });
 
+// 1b) Mid-Year Review draft — per a reference screenshot: "Reads the KRAs
+// and every 1-on-1 connect logged this cycle, then writes a balanced
+// progress summary you can edit before submitting." Works for EITHER
+// perspective: the employee drafting their own reflection (self-service,
+// no special permission — matches how connect-extract works), or the
+// manager drafting their narrative about a report (pms_team_eval +
+// ownership, same as appraisal-draft above). Never suggests a rating,
+// same rule as every other draft feature here.
+router.post('/midyear-draft', async (req, res) => {
+  try {
+    const { employee_id, perspective } = req.body || {};
+    if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+    if (!['self', 'manager'].includes(perspective)) return res.status(400).json({ error: "perspective must be 'self' or 'manager'" });
+    const isSelf = perspective === 'self' && employee_id === req.user.id;
+    if (!isSelf) {
+      if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    }
+    const emp = (await db.query(`SELECT id, name, manager_id, department FROM core.employees WHERE id=$1 AND tenant_id=$2`, [employee_id, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (!isSelf && emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+
+    const c = await activeCycle(T(req));
+    if (!c) return res.status(409).json({ error: 'No active cycle' });
+    const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, employee_id])).rows[0];
+    const kras = sheet ? (await db.query(`SELECT title, weight, measures FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows : [];
+    const connects = (await db.query(
+      `SELECT held_at, COALESCE(discussion_notes, notes) AS discussion, achievements, blockers, feedback FROM pms.connects
+        WHERE tenant_id=$1 AND employee_id=$2 AND held_at >= COALESCE($3, held_at) ORDER BY held_at DESC LIMIT 8`,
+      [T(req), employee_id, c.opens_at || null])).rows;
+    const checkin = (await db.query(`SELECT self_narrative, self_status FROM pms.midyear_checkins WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, employee_id])).rows[0];
+
+    const input = {
+      employee: emp.name, perspective,
+      kras: kras.map((k) => ({ title: k.title, weight: +k.weight, measures: k.measures })),
+      connects_this_cycle: connects,
+      employee_self_reflection: perspective === 'manager' && checkin && checkin.self_status === 'submitted' ? checkin.self_narrative : null,
+    };
+    const out = await ai.narrate({
+      tenantId: T(req), kind: 'midyear_draft', ref: { cycle_id: c.id, employee_id },
+      requestedBy: req.user.email, input, maxTokens: 800,
+      system: perspective === 'self'
+        ? `You draft an EMPLOYEE's own mid-year reflection, in first person ("I"), from their KRAs
+and their own logged 1-on-1 connects this cycle. Cover highlights, challenges, and focus for
+next half. Ground everything in the input; invent nothing. Never suggest or imply a rating.
+Respond ONLY with JSON: {"narrative":"2-4 sentences, first person","gaps":["anything the input lacked"]}`
+        : `You draft a MANAGER's mid-year narrative about ONE employee, from their KRAs, the
+manager's own logged 1-on-1 connects this cycle, and (if available) the employee's own
+submitted self-reflection. Ground everything in the input; invent nothing. Never suggest or
+imply a numeric rating — judgement is the manager's alone.
+Respond ONLY with JSON: {"narrative":"2-4 sentences","gaps":["anything the input lacked"]}`,
+    });
+    res.json({ ok: true, ...out });
+  } catch (e) { fail(res, e); }
+});
+
 // 2) Calibration brief — before the session. Input: distribution vs bell
 // curve, unrated count, largest department deviations, adjustment history.
 router.post('/calibration-brief', async (req, res) => {

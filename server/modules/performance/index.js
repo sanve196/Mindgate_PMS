@@ -818,32 +818,76 @@ router.put('/my/pulse-check', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---------------- Mid-Year Review consolidation — BR-5.1/5.2 ---------------
-// "Consolidates progress against KRAs and the development plan"
-// (BR-5.1) + "requires independent sign-off from both the employee and
-// the manager, with status tracked as Pending/Signed for each party"
-// (BR-5.2). The editing itself already existed generically (self_edit/
-// manager_edit phase gates work for any cycle_type, so self-appraisal
-// and manager-evaluation entry already function during a midyear cycle)
-// — what was missing was a place either party could see BOTH sign-off
-// statuses side by side, which this adds without duplicating any of the
-// existing editing routes.
-async function buildMidYearSummary(tenantId, employeeId, cycleId) {
-  const self = (await db.query(`SELECT status, overall_self_rating, went_well, could_improve FROM pms.self_appraisals WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
-  const mgr = (await db.query(`SELECT status, overall_rating, strengths, improvement_areas FROM pms.manager_evaluations WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
-  const signOff = (row) => (row && row.status === 'submitted' ? 'Signed' : 'Pending');
-  return {
-    self: self ? { ...self, sign_off: signOff(self) } : { status: 'not_started', sign_off: 'Pending' },
-    manager: mgr ? { ...mgr, sign_off: signOff(mgr) } : { status: 'not_started', sign_off: 'Pending' },
-  };
+// ---------------- Mid-Year Review — BR-5.1/5.2 (rebuilt) --------------------
+// "Consolidates progress against KRAs and the development plan" (BR-5.1)
+// + "requires independent sign-off from both the employee and the
+// manager" (BR-5.2). REBUILT per an explicit request with a reference
+// screenshot, replacing the old version that (a) only ever worked for a
+// separate cycle_type='midyear' cycle rather than a phase any cycle
+// passes through, and (b) was read-only — it linked out to the Self-
+// Appraisal/Team Evaluation screens to actually edit anything, rather
+// than being an editable screen itself with its own "Generate AI draft".
+// Backed by pms.midyear_checkins (migration 020) — see phase-machine.js's
+// comment on mid_year_review for why this is a separate table from
+// self_appraisals/manager_evaluations, not a reuse of them.
+async function ensureMidyearCheckin(tenantId, cycleId, employeeId) {
+  let row = (await db.query(`SELECT * FROM pms.midyear_checkins WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [tenantId, cycleId, employeeId])).rows[0];
+  if (!row) {
+    const emp = (await db.query(`SELECT manager_id FROM core.employees WHERE id=$1`, [employeeId])).rows[0];
+    row = (await db.query(
+      `INSERT INTO pms.midyear_checkins (tenant_id, cycle_id, employee_id, manager_id) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [tenantId, cycleId, employeeId, emp ? emp.manager_id : null])).rows[0];
+  }
+  return row;
+}
+
+function validateRating(value, ratingScale) {
+  if (value == null || value === '') return { ok: true, value: null };
+  const n = Number(value);
+  const scale = Array.isArray(ratingScale) ? ratingScale : [];
+  if (!scale.some((s) => s.value === n)) return { ok: false, reason: `rating must be one of: ${scale.map((s) => `${s.value} (${s.label})`).join(', ')}` };
+  return { ok: true, value: n };
 }
 
 router.get('/my/midyear-review', async (req, res) => {
   try {
-    const c = await activeCycle(T(req), 'midyear');
-    if (!c) return res.json({ cycle: null });
-    const summary = await buildMidYearSummary(T(req), req.user.id, c.id);
-    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, ...summary });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, checkin: null });
+    const row = await ensureMidyearCheckin(T(req), c.id, req.user.id);
+    const editable = pm.phaseAllows(c.phase, 'midyear_self_edit');
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase, rating_scale: c.rating_scale }, checkin: row, editable });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/my/midyear-review', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'midyear_self_edit')) return res.status(409).json({ error: `Mid-Year Review is not open (phase: ${c ? c.phase : 'none'}) — opens once HR moves the cycle from Growth Planning to Mid-Year Review` });
+    const row = await ensureMidyearCheckin(T(req), c.id, req.user.id);
+    if (row.self_status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
+    const { self_rating, self_narrative } = req.body || {};
+    const rv = validateRating(self_rating, c.rating_scale);
+    if (!rv.ok) return res.status(422).json({ error: rv.reason });
+    await db.query(
+      `UPDATE pms.midyear_checkins SET self_status='in_progress',
+         self_rating=COALESCE($2,self_rating), self_narrative=COALESCE($3,self_narrative), updated_at=now()
+       WHERE id=$1`,
+      [row.id, rv.value, self_narrative ?? null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/my/midyear-review/submit', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'midyear_self_submit')) return res.status(409).json({ error: 'Mid-Year Review submission is not open' });
+    const row = await ensureMidyearCheckin(T(req), c.id, req.user.id);
+    if (row.self_status === 'submitted') return res.status(409).json({ error: 'already submitted' });
+    if (!row.self_narrative || !row.self_narrative.trim()) return res.status(422).json({ error: 'Add your reflection before signing.' });
+    await db.query(`UPDATE pms.midyear_checkins SET self_status='submitted', self_submitted_at=now(), updated_at=now() WHERE id=$1`, [row.id]);
+    audit(req, 'MIDYEAR_SELF_SUBMITTED', c.id, req.user.id, null);
+    if (row.manager_id) await notify(T(req), row.manager_id, 'midyear_self_signed', `${req.user.name} signed their Mid-Year Review`, null, '/pms/team/midyear-review');
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -854,10 +898,49 @@ router.get('/team/midyear-review/:employeeId', async (req, res) => {
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'pms_hod'))) {
       return res.status(403).json({ error: 'Not your report' });
     }
-    const c = await activeCycle(T(req), 'midyear');
-    if (!c) return res.json({ cycle: null, employee: { id: emp.id, name: emp.name } });
-    const summary = await buildMidYearSummary(T(req), emp.id, c.id);
-    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, employee: { id: emp.id, name: emp.name }, ...summary });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, employee: { id: emp.id, name: emp.name }, checkin: null });
+    const row = await ensureMidyearCheckin(T(req), c.id, emp.id);
+    const editable = pm.phaseAllows(c.phase, 'midyear_manager_edit');
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase, rating_scale: c.rating_scale }, employee: { id: emp.id, name: emp.name }, checkin: row, editable });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/team/midyear-review/:employeeId', async (req, res) => {
+  try {
+    const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'midyear_manager_edit')) return res.status(409).json({ error: `Mid-Year Review is not open (phase: ${c ? c.phase : 'none'})` });
+    const row = await ensureMidyearCheckin(T(req), c.id, emp.id);
+    if (row.manager_status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
+    const { manager_rating, manager_narrative } = req.body || {};
+    const rv = validateRating(manager_rating, c.rating_scale);
+    if (!rv.ok) return res.status(422).json({ error: rv.reason });
+    await db.query(
+      `UPDATE pms.midyear_checkins SET manager_status='in_progress',
+         manager_rating=COALESCE($2,manager_rating), manager_narrative=COALESCE($3,manager_narrative), updated_at=now()
+       WHERE id=$1`,
+      [row.id, rv.value, manager_narrative ?? null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/team/midyear-review/:employeeId/submit', async (req, res) => {
+  try {
+    const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'midyear_manager_submit')) return res.status(409).json({ error: 'Mid-Year Review submission is not open' });
+    const row = await ensureMidyearCheckin(T(req), c.id, emp.id);
+    if (row.manager_status === 'submitted') return res.status(409).json({ error: 'already submitted' });
+    if (!row.manager_narrative || !row.manager_narrative.trim()) return res.status(422).json({ error: 'Add your narrative before signing.' });
+    await db.query(`UPDATE pms.midyear_checkins SET manager_status='submitted', manager_submitted_at=now(), updated_at=now() WHERE id=$1`, [row.id]);
+    audit(req, 'MIDYEAR_MANAGER_SUBMITTED', c.id, emp.id, null);
+    await notify(T(req), emp.id, 'midyear_manager_signed', `${req.user.name} signed off your Mid-Year Review`, null, '/pms/my/midyear');
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

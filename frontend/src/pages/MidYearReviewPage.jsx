@@ -1,51 +1,284 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { CheckCircle2, Clock } from 'lucide-react';
-import { api } from '../utils/api';
+import { useEffect, useRef, useState } from 'react';
+import { Sparkles, Send, CheckCircle2, Clock, ChevronDown, ChevronRight } from 'lucide-react';
+import { api, phaseLabel, phaseColor, DraftBadge } from '../utils/api';
 
+// Rebuilt per an explicit request with a reference screenshot: previously
+// this page only ever showed a read-only summary of the ANNUAL self-
+// appraisal/manager-evaluation screens (linking out to edit them there).
+// Now it's a real, self-contained editing screen — employee narrative +
+// self-rating, manager narrative + rating, side by side, each with its
+// own "Generate AI draft" and independent sign-off — backed by
+// pms.midyear_checkins (migration 020), gated to the new mid_year_review
+// phase (phase-machine.js).
 export default function MidYearReviewPage() {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
-  useEffect(() => { api('/pms/my/midyear-review').then(setData).catch(e => setErr(e.message)); }, []);
-
-  if (err) return <p className="text-sm text-rose-600">{err}</p>;
-  if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
-  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active mid-year cycle.</div>;
-
   return (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <div className="flex items-center gap-2">
-        <h2 className="text-lg font-bold">Mid-Year Review</h2>
-        <span className="chip bg-cyan-100 text-cyan-700">{data.cycle.name}</span>
-      </div>
-
-      <div className="grid sm:grid-cols-2 gap-3">
-        <SignOffCard title="Your sign-off" party={data.self} ratingLabel="Self rating" rating={data.self.overall_self_rating}
-          narratives={[['Went well', data.self.went_well], ['Could improve', data.self.could_improve]]}
-          editHref="/my/self-appraisal" editLabel="Go to Self-Appraisal" />
-        <SignOffCard title="Manager sign-off" party={data.manager} ratingLabel="Manager rating" rating={data.manager.overall_rating}
-          narratives={[['Strengths', data.manager.strengths], ['Improvement areas', data.manager.improvement_areas]]} />
-      </div>
-
-      <p className="text-xs text-navy-400">Both sides sign off independently — each is tracked as Pending or Signed until they submit their half.</p>
+    <div className="space-y-4 max-w-4xl mx-auto">
+      <h2 className="text-lg font-bold">Mid-Year Review</h2>
+      <MyMidYearCard />
+      <TeamMidYearReviews />
     </div>
   );
 }
 
-function SignOffCard({ title, party, ratingLabel, rating, narratives, editHref, editLabel }) {
-  const signed = party.sign_off === 'Signed';
+function ratingLabel(value, scale) {
+  if (value == null) return null;
+  const m = (scale || []).find((s) => s.value === Number(value));
+  return m ? m.label : value;
+}
+
+function StatusPill({ label, signed }) {
   return (
-    <div className="card p-4 space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="font-bold text-sm">{title}</p>
-        <span className={`chip flex items-center gap-1 ${signed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-          {signed ? <CheckCircle2 size={12} /> : <Clock size={12} />}{party.sign_off}
-        </span>
+    <div className="flex items-center justify-between bg-navy-50 rounded-lg px-3 py-2">
+      <span className="text-[11px] font-semibold text-navy-500 uppercase tracking-wide">{label}</span>
+      <span className={`chip flex items-center gap-1 ${signed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+        {signed ? <CheckCircle2 size={11} /> : <Clock size={11} />}{signed ? 'Signed' : 'Pending'}
+      </span>
+    </div>
+  );
+}
+
+function MyMidYearCard() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [selfRating, setSelfRating] = useState('');
+  const [selfNarrative, setSelfNarrative] = useState('');
+  const [saveState, setSaveState] = useState('idle');
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const timer = useRef(null);
+
+  const load = () => api('/pms/my/midyear-review').then((r) => {
+    setData(r);
+    if (r.checkin) { setSelfRating(r.checkin.self_rating ?? ''); setSelfNarrative(r.checkin.self_narrative || ''); }
+    setErr(null);
+  }).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+
+  const persist = async (patch) => {
+    setSaveState('saving');
+    try { await api('/pms/my/midyear-review', { method: 'PUT', body: JSON.stringify(patch) }); setSaveState('saved'); }
+    catch (e) { setSaveState('error'); setErr(e.message); }
+  };
+  const scheduleSave = (narrative) => {
+    setSaveState('dirty');
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => persist({ self_narrative: narrative }), 1200);
+  };
+  const pickRating = (value) => { setSelfRating(value); persist({ self_rating: value }); };
+  const askDraft = async () => {
+    setDrafting(true); setErr(null);
+    try { const r = await api('/agentic/midyear-draft', { method: 'POST', body: JSON.stringify({ employee_id: data.checkin.employee_id, perspective: 'self' }) }); setDraft(r); }
+    catch (e) { setErr(e.message); }
+    setDrafting(false);
+  };
+  const submit = async () => {
+    setErr(null);
+    try { await api('/pms/my/midyear-review/submit', { method: 'POST' }); load(); }
+    catch (e) { setErr(e.message); }
+  };
+
+  if (err && !data) return <div className="card p-4"><p className="text-sm text-rose-600">{err}</p></div>;
+  if (!data) return <div className="card p-4"><p className="text-sm text-navy-400">Loading…</p></div>;
+  if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
+
+  const selfSigned = data.checkin.self_status === 'submitted';
+  const mgrSigned = data.checkin.manager_status === 'submitted';
+  const editable = data.editable && !selfSigned;
+  const badge = { idle: null, dirty: ['Unsaved…', 'text-navy-400'], saving: ['Saving…', 'text-amber-600'], saved: ['Saved ✓', 'text-emerald-600'], error: ['Save failed', 'text-rose-600'] }[saveState];
+
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-bold text-sm">Mid-Year Review · {data.cycle.name}</p>
+          <p className="text-xs text-navy-400">Halfway checkpoint against KRAs and the development plan</p>
+        </div>
+        <span className={`chip ${phaseColor(data.cycle.phase)}`}>{phaseLabel(data.cycle.phase)}</span>
       </div>
-      {rating != null && <p className="text-xs">{ratingLabel}: <span className="font-mono font-semibold">{rating}</span></p>}
-      {narratives.map(([label, text]) => text && <p key={label} className="text-xs"><b>{label}:</b> {text}</p>)}
-      {!signed && party.status === 'not_started' && <p className="text-xs text-navy-400">Not started yet.</p>}
-      {editHref && !signed && <Link to={editHref} className="btn-sec inline-block !py-1 !text-[11px]">{editLabel}</Link>}
+
+      <div className="grid sm:grid-cols-2 gap-2">
+        <StatusPill label="Employee (you)" signed={selfSigned} />
+        <StatusPill label="Manager" signed={mgrSigned} />
+      </div>
+
+      {!data.editable && !selfSigned && (
+        <p className="text-xs text-navy-400 bg-navy-50 rounded-lg p-2">
+          Mid-Year Review opens once HR moves the cycle from Growth Planning to Mid-Year Review (currently: {phaseLabel(data.cycle.phase)}).
+        </p>
+      )}
+
+      {editable && (
+        <div className="bg-gradient-to-r from-fuchsia-50 to-rose-50 border border-fuchsia-100 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold text-fuchsia-700">+ Start with an AI draft</p>
+            <p className="text-[11px] text-navy-500">Reads your KRAs and every 1-on-1 connect logged this cycle, then writes a balanced progress summary you can edit before submitting.</p>
+          </div>
+          <button className="btn-pri !bg-fuchsia-700" disabled={drafting} onClick={askDraft}>
+            <Sparkles size={13} className="inline mr-1" />{drafting ? 'Drafting…' : 'Generate AI draft'}
+          </button>
+        </div>
+      )}
+      {draft && (
+        <div className="bg-navy-800 text-slate-100 rounded-lg p-3 text-xs space-y-2">
+          <DraftBadge />
+          <p>{draft.narrative}</p>
+          {(draft.gaps || []).length > 0 && <p className="text-amber-300">Input gaps: {draft.gaps.join(' · ')}</p>}
+          <button className="btn-sec !bg-navy-700 !text-white !border-navy-600"
+            onClick={() => { setSelfNarrative(draft.narrative); persist({ self_narrative: draft.narrative }); }}>
+            Copy into narrative (then edit)
+          </button>
+        </div>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="border border-navy-100 rounded-xl p-3 space-y-2">
+          <p className="text-[10px] uppercase font-bold text-navy-400">From the employee (you)</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="lbl mb-0">Self-rating</span>
+            {(data.cycle.rating_scale || []).map((s) => (
+              <button key={s.value} type="button" disabled={!editable}
+                className={`chip ${Number(selfRating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
+                onClick={() => pickRating(s.value)}>{s.label}</button>
+            ))}
+          </div>
+          <textarea className="inp" rows={4} placeholder="Reflect on progress this half — highlights, challenges, focus for next half."
+            disabled={!editable} value={selfNarrative} onChange={(e) => { setSelfNarrative(e.target.value); scheduleSave(e.target.value); }} />
+          <div className="flex items-center gap-2">
+            {editable && <button className="btn-pri" onClick={submit}><Send size={12} className="inline mr-1" />Save & sign</button>}
+            {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
+          </div>
+        </div>
+        <div className="border border-navy-100 rounded-xl p-3 space-y-2">
+          <p className="text-[10px] uppercase font-bold text-navy-400">From the manager</p>
+          <p className="text-xs"><b>Mid-year rating:</b> {ratingLabel(data.checkin.manager_rating, data.cycle.rating_scale) ?? '—'}</p>
+          <p className="text-xs text-navy-500">{data.checkin.manager_narrative || 'Not written yet.'}</p>
+        </div>
+      </div>
+      {err && <p className="text-xs text-rose-600">{err}</p>}
+    </div>
+  );
+}
+
+// Manager side — mirrors the "expand a report" pattern already used by
+// Team KRA Sheets / Team Development Plans, so a manager sees the same
+// interaction everywhere. Uses the existing /team/evaluations list for
+// "who are my reports" (already fetched elsewhere in the app) and the
+// new /team/midyear-review/:employeeId for the detail once expanded.
+function TeamMidYearReviews() {
+  const [team, setTeam] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  useEffect(() => { api('/pms/team/evaluations').then((r) => setTeam(r.team || [])).catch(() => setTeam([])); }, []);
+
+  if (!team || !team.length) return null;
+
+  return (
+    <div className="space-y-2">
+      <p className="font-bold text-sm">Team Mid-Year Reviews</p>
+      {team.map((t) => (
+        <div key={t.employee_id} className="card overflow-hidden">
+          <button className="w-full flex items-center gap-2 px-4 py-3 text-left" onClick={() => setOpenId((v) => (v === t.employee_id ? null : t.employee_id))}>
+            {openId === t.employee_id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span className="text-sm font-semibold flex-1">{t.name}</span>
+          </button>
+          {openId === t.employee_id && <TeamMidYearDetail employeeId={t.employee_id} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TeamMidYearDetail({ employeeId }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [managerRating, setManagerRating] = useState('');
+  const [managerNarrative, setManagerNarrative] = useState('');
+  const [saveState, setSaveState] = useState('idle');
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const timer = useRef(null);
+
+  const load = () => api(`/pms/team/midyear-review/${employeeId}`).then((r) => {
+    setData(r);
+    if (r.checkin) { setManagerRating(r.checkin.manager_rating ?? ''); setManagerNarrative(r.checkin.manager_narrative || ''); }
+    setErr(null);
+  }).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, [employeeId]);
+
+  const persist = async (patch) => {
+    setSaveState('saving');
+    try { await api(`/pms/team/midyear-review/${employeeId}`, { method: 'PUT', body: JSON.stringify(patch) }); setSaveState('saved'); }
+    catch (e) { setSaveState('error'); setErr(e.message); }
+  };
+  const scheduleSave = (narrative) => {
+    setSaveState('dirty');
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => persist({ manager_narrative: narrative }), 1200);
+  };
+  const pickRating = (value) => { setManagerRating(value); persist({ manager_rating: value }); };
+  const askDraft = async () => {
+    setDrafting(true); setErr(null);
+    try { const r = await api('/agentic/midyear-draft', { method: 'POST', body: JSON.stringify({ employee_id: employeeId, perspective: 'manager' }) }); setDraft(r); }
+    catch (e) { setErr(e.message); }
+    setDrafting(false);
+  };
+  const submit = async () => {
+    setErr(null);
+    try { await api(`/pms/team/midyear-review/${employeeId}/submit`, { method: 'POST' }); load(); }
+    catch (e) { setErr(e.message); }
+  };
+
+  if (err && !data) return <p className="border-t border-navy-100 p-4 text-xs text-rose-600">{err}</p>;
+  if (!data) return <p className="border-t border-navy-100 p-4 text-xs text-navy-400">Loading…</p>;
+  if (!data.cycle) return <p className="border-t border-navy-100 p-4 text-xs text-navy-400">No active cycle.</p>;
+
+  const selfSigned = data.checkin.self_status === 'submitted';
+  const mgrSigned = data.checkin.manager_status === 'submitted';
+  const editable = data.editable && !mgrSigned;
+  const badge = { idle: null, dirty: ['Unsaved…', 'text-navy-400'], saving: ['Saving…', 'text-amber-600'], saved: ['Saved ✓', 'text-emerald-600'], error: ['Save failed', 'text-rose-600'] }[saveState];
+
+  return (
+    <div className="border-t border-navy-100 p-4 space-y-3">
+      <div className="grid sm:grid-cols-2 gap-2">
+        <StatusPill label="Employee" signed={selfSigned} />
+        <StatusPill label="You" signed={mgrSigned} />
+      </div>
+      <div className="bg-navy-50 rounded-lg p-3 text-xs space-y-1">
+        <p className="font-bold text-navy-500 uppercase text-[10px]">Their reflection</p>
+        {data.checkin.self_narrative ? <p>{data.checkin.self_narrative}</p> : <p className="text-navy-400">Not written yet.</p>}
+      </div>
+      {editable && (
+        <div className="bg-gradient-to-r from-fuchsia-50 to-rose-50 border border-fuchsia-100 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[11px] text-navy-500">Draft a narrative from their KRAs, your logged 1-on-1s this cycle, and their reflection above.</p>
+          <button className="btn-pri !bg-fuchsia-700" disabled={drafting} onClick={askDraft}>
+            <Sparkles size={13} className="inline mr-1" />{drafting ? 'Drafting…' : 'Generate AI draft'}
+          </button>
+        </div>
+      )}
+      {draft && (
+        <div className="bg-navy-800 text-slate-100 rounded-lg p-3 text-xs space-y-2">
+          <DraftBadge />
+          <p>{draft.narrative}</p>
+          <button className="btn-sec !bg-navy-700 !text-white !border-navy-600"
+            onClick={() => { setManagerNarrative(draft.narrative); persist({ manager_narrative: draft.narrative }); }}>
+            Copy into narrative (then edit)
+          </button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="lbl mb-0">Mid-year rating</span>
+        {(data.cycle.rating_scale || []).map((s) => (
+          <button key={s.value} type="button" disabled={!editable}
+            className={`chip ${Number(managerRating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
+            onClick={() => pickRating(s.value)}>{s.label}</button>
+        ))}
+      </div>
+      <textarea className="inp" rows={3} placeholder="Your narrative for this employee's mid-year progress."
+        disabled={!editable} value={managerNarrative} onChange={(e) => { setManagerNarrative(e.target.value); scheduleSave(e.target.value); }} />
+      <div className="flex items-center gap-2">
+        {editable && <button className="btn-pri" onClick={submit}><Send size={12} className="inline mr-1" />Save & sign</button>}
+        {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
+      </div>
+      {err && <p className="text-xs text-rose-600">{err}</p>}
     </div>
   );
 }
