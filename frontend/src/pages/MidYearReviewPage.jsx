@@ -20,10 +20,17 @@ export default function MidYearReviewPage() {
   );
 }
 
-function ratingLabel(value, scale) {
+// Matches the convention already established on Self-Appraisal/Team
+// Evaluation: picking a rating uses letter grades (A+ down to C), but
+// any READ-ONLY summary display of a rating uses the older descriptive
+// wording (Outstanding down to Needs Improvement) — fixed local maps
+// rather than trusting cycle.rating_scale's own .label field, since that
+// field differs per cycle and this pairing needs to hold regardless.
+const KRA_GRADE_LABEL = { 5: 'A+', 4: 'A', 3: 'B+', 2: 'B', 1: 'C' };
+const OVERALL_DESCRIPTIVE_LABEL = { 5: 'Outstanding', 4: 'Exceeds', 3: 'Meets Expectations', 2: 'Developing', 1: 'Needs Improvement' };
+function overallLabel(value) {
   if (value == null) return null;
-  const m = (scale || []).find((s) => s.value === Number(value));
-  return m ? m.label : value;
+  return OVERALL_DESCRIPTIVE_LABEL[Number(value)] || value;
 }
 
 function StatusPill({ label, signed }) {
@@ -149,7 +156,7 @@ function MyMidYearCard() {
             {(data.cycle.rating_scale || []).map((s) => (
               <button key={s.value} type="button" disabled={!editable}
                 className={`chip ${Number(selfRating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
-                onClick={() => pickRating(s.value)}>{s.label}</button>
+                onClick={() => pickRating(s.value)}>{KRA_GRADE_LABEL[s.value] || s.label}</button>
             ))}
           </div>
           <textarea className="inp" rows={4} placeholder="Reflect on progress this half — highlights, challenges, focus for next half."
@@ -162,7 +169,7 @@ function MyMidYearCard() {
         </div>
         <div className="border border-navy-100 rounded-xl p-3 space-y-2">
           <p className="text-[10px] uppercase font-bold text-navy-400">From the manager</p>
-          <p className="text-xs"><b>Mid-year rating:</b> {ratingLabel(data.checkin.manager_rating, data.cycle.rating_scale) ?? '—'}</p>
+          <p className="text-xs"><b>Mid-year rating:</b> {overallLabel(data.checkin.manager_rating) ?? '—'}</p>
           <p className="text-xs text-navy-500">{data.checkin.manager_narrative || 'Not written yet.'}</p>
         </div>
       </div>
@@ -280,13 +287,14 @@ function TeamMidYearDetail({ employeeId }) {
           </button>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="lbl mb-0">Mid-year rating</span>
-        {(data.cycle.rating_scale || []).map((s) => (
-          <button key={s.value} type="button" disabled={!editable}
-            className={`chip ${Number(managerRating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
-            onClick={() => pickRating(s.value)}>{s.label}</button>
-        ))}
+        <select className="inp w-auto" value={managerRating} disabled={!editable} onChange={(e) => pickRating(e.target.value === '' ? '' : Number(e.target.value))}>
+          <option value="">—</option>
+          {(data.cycle.rating_scale || []).map((s) => (
+            <option key={s.value} value={s.value}>{KRA_GRADE_LABEL[s.value] || s.label}</option>
+          ))}
+        </select>
       </div>
       <textarea className="inp" rows={3} placeholder="Your narrative for this employee's mid-year progress."
         disabled={!editable} value={managerNarrative} onChange={(e) => { setManagerNarrative(e.target.value); scheduleSave(e.target.value); }} />
