@@ -529,6 +529,47 @@ router.put('/:employeeId/role', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Found live: assigning someone the "hod" role (above) grants the
+// PERMISSION to open Delivery Head Review, but /hod/queue scopes what
+// they actually SEE by core.department_heads (which department they
+// head) — a completely separate table that nothing in this app ever
+// wrote to. Setting someone's role to "hod" alone left their queue
+// permanently empty ("Nothing awaiting Delivery Head review"), with no
+// way for HR to fix it — this is that missing piece.
+router.get('/department-heads', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const depts = (await db.query(
+      `SELECT DISTINCT department FROM core.employees WHERE tenant_id=$1 AND status='active' AND department IS NOT NULL ORDER BY department`,
+      [req.user.tenant_id])).rows.map((r) => r.department);
+    const heads = (await db.query(
+      `SELECT dh.department, dh.employee_id, e.name, e.email FROM core.department_heads dh
+         JOIN core.employees e ON e.id=dh.employee_id WHERE dh.tenant_id=$1`, [req.user.tenant_id])).rows;
+    const headByDept = Object.fromEntries(heads.map((h) => [h.department, h]));
+    res.json({ departments: depts.map((d) => ({ department: d, head: headByDept[d] || null })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/department-heads/:department', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'people_admin'))) return res.status(403).json({ error: "Requires 'people_admin'" });
+    const { employee_id } = req.body || {};
+    const department = decodeURIComponent(req.params.department);
+    if (!employee_id) {
+      await db.query(`DELETE FROM core.department_heads WHERE tenant_id=$1 AND department=$2`, [req.user.tenant_id, department]);
+      return res.json({ ok: true, department, head: null });
+    }
+    const emp = (await db.query(`SELECT id, name, email FROM core.employees WHERE id=$1 AND tenant_id=$2 AND status='active'`, [employee_id, req.user.tenant_id])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    await db.query(
+      `INSERT INTO core.department_heads (tenant_id, department, employee_id) VALUES ($1,$2,$3)
+       ON CONFLICT (tenant_id, department) DO UPDATE SET employee_id=EXCLUDED.employee_id`,
+      [req.user.tenant_id, department, employee_id]);
+    audit(req, 'DEPARTMENT_HEAD_SET', null, employee_id, { department });
+    res.json({ ok: true, department, head: { employee_id: emp.id, name: emp.name, email: emp.email } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /employees/import  (multipart file, .csv/.xlsx/.xls) ?commit=1 to load; default DRY RUN.
 router.post('/import', (req, res, next) => upload.single('file')(req, res, (err) => {
   if (err) return res.status(400).json({ error: err.message });
