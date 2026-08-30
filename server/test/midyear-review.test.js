@@ -154,3 +154,22 @@ test('signing off the mid-year checkpoint does not lock the SAME cycle\'s later 
   assert.equal(pm.phaseAllows('mid_year_review', 'self_edit'), false, 'mid_year_review never grants the annual self_edit action');
   assert.equal(pm.phaseAllows('self_appraisal', 'self_edit'), true, 'self_appraisal still grants it normally, independent of what happened during mid_year_review');
 });
+
+// Found live: reported as "even after HR opens Mid-Year Review, the
+// employee still can't edit." Root cause — a NEWER, earlier-phase cycle
+// (easy to accumulate in testing: draft cycles started and abandoned)
+// was silently outranking the correctly-advanced one under plain
+// activeCycle()'s "most recently CREATED" heuristic. This proves the
+// hardened resolver picks the cycle that's actually at mid_year_review,
+// not whichever is newest.
+test('a newer, earlier-phase cycle does not shadow the one actually at mid_year_review', { skip }, async () => {
+  // A second cycle, created AFTER the mid_year_review one, still in draft.
+  await db.query(
+    `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, phase, created_at) VALUES ($1,'MY Newer Draft','FYND','annual','draft', now() + interval '1 hour')`,
+    [tenantId]);
+
+  const empAuth = await login('my-emp@x.com');
+  const get = await api('/pms/my/midyear-review', empAuth.token);
+  assert.equal(get.body.cycle.name, 'MY Cycle', 'resolves to the cycle actually at mid_year_review, not the newer draft one');
+  assert.equal(get.body.editable, true);
+});

@@ -40,6 +40,26 @@ async function activeCycle(tenantId, type = null) {
   return r.rows[0] || null;
 }
 
+// Found live: with several non-closed test cycles under one tenant (easy
+// to accumulate — draft cycles started and abandoned, etc.), plain
+// activeCycle()'s "most recently CREATED" heuristic can pick a newer,
+// earlier-phase cycle instead of the one HR actually just advanced to
+// mid_year_review — silently resolving Mid-Year Review (and its AI
+// draft's KRA/connect lookups) against the WRONG cycle, so the employee
+// sees "not editable" even though the right cycle is clearly open.
+// Prefers whichever non-closed cycle is CURRENTLY at, or has already
+// passed, mid_year_review; only falls back to plain activeCycle() (e.g.
+// showing "not open yet" correctly) when none has reached it yet.
+async function activeCycleForMidyear(tenantId) {
+  const passed = (await db.query(
+    `SELECT * FROM pms.cycles WHERE tenant_id=$1 AND phase NOT IN ('closed','cancelled')
+       AND phase = ANY($2::text[])
+     ORDER BY (phase='mid_year_review') DESC, created_at DESC LIMIT 1`,
+    [tenantId, ['mid_year_review', 'self_appraisal', 'manager_eval', 'hod_eval', 'calibration', 'publish']])).rows[0];
+  if (passed) return passed;
+  return activeCycle(tenantId);
+}
+
 // BR-6.6: "For employees flagged under BR-6.5 [Super 50], proactively
 // alert HR/Management to consider retention actions." Fans out an in-app
 // notification to every employee holding the hr or admin role in this
@@ -851,7 +871,7 @@ function validateRating(value, ratingScale) {
 
 router.get('/my/midyear-review', async (req, res) => {
   try {
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c) return res.json({ cycle: null, checkin: null });
     const row = await ensureMidyearCheckin(T(req), c.id, req.user.id);
     const editable = pm.phaseAllows(c.phase, 'midyear_self_edit');
@@ -861,7 +881,7 @@ router.get('/my/midyear-review', async (req, res) => {
 
 router.put('/my/midyear-review', async (req, res) => {
   try {
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c || !pm.phaseAllows(c.phase, 'midyear_self_edit')) return res.status(409).json({ error: `Mid-Year Review is not open (phase: ${c ? c.phase : 'none'}) — opens once HR moves the cycle from Growth Planning to Mid-Year Review` });
     const row = await ensureMidyearCheckin(T(req), c.id, req.user.id);
     if (row.self_status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
@@ -879,7 +899,7 @@ router.put('/my/midyear-review', async (req, res) => {
 
 router.post('/my/midyear-review/submit', async (req, res) => {
   try {
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c || !pm.phaseAllows(c.phase, 'midyear_self_submit')) return res.status(409).json({ error: 'Mid-Year Review submission is not open' });
     const row = await ensureMidyearCheckin(T(req), c.id, req.user.id);
     if (row.self_status === 'submitted') return res.status(409).json({ error: 'already submitted' });
@@ -898,7 +918,7 @@ router.get('/team/midyear-review/:employeeId', async (req, res) => {
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'pms_hod'))) {
       return res.status(403).json({ error: 'Not your report' });
     }
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c) return res.json({ cycle: null, employee: { id: emp.id, name: emp.name }, checkin: null });
     const row = await ensureMidyearCheckin(T(req), c.id, emp.id);
     const editable = pm.phaseAllows(c.phase, 'midyear_manager_edit');
@@ -911,7 +931,7 @@ router.put('/team/midyear-review/:employeeId', async (req, res) => {
     const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c || !pm.phaseAllows(c.phase, 'midyear_manager_edit')) return res.status(409).json({ error: `Mid-Year Review is not open (phase: ${c ? c.phase : 'none'})` });
     const row = await ensureMidyearCheckin(T(req), c.id, emp.id);
     if (row.manager_status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
@@ -932,7 +952,7 @@ router.post('/team/midyear-review/:employeeId/submit', async (req, res) => {
     const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c || !pm.phaseAllows(c.phase, 'midyear_manager_submit')) return res.status(409).json({ error: 'Mid-Year Review submission is not open' });
     const row = await ensureMidyearCheckin(T(req), c.id, emp.id);
     if (row.manager_status === 'submitted') return res.status(409).json({ error: 'already submitted' });

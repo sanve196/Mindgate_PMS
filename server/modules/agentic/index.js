@@ -21,6 +21,21 @@ async function activeCycle(tenantId) {
   return r.rows[0] || null;
 }
 
+// Same reasoning as modules/performance/index.js's activeCycleForMidyear:
+// prefer a cycle actually at/past mid_year_review over blind "most
+// recently created," so the AI draft's KRA/connect lookups don't
+// silently scope against the wrong cycle when several non-closed test
+// cycles exist for one tenant.
+async function activeCycleForMidyear(tenantId) {
+  const passed = (await db.query(
+    `SELECT * FROM pms.cycles WHERE tenant_id=$1 AND phase NOT IN ('closed','cancelled')
+       AND phase = ANY($2::text[])
+     ORDER BY (phase='mid_year_review') DESC, created_at DESC LIMIT 1`,
+    [tenantId, ['mid_year_review', 'self_appraisal', 'manager_eval', 'hod_eval', 'calibration', 'publish']])).rows[0];
+  if (passed) return passed;
+  return activeCycle(tenantId);
+}
+
 // 1) Appraisal summary draft — for the MANAGER writing an evaluation.
 // Input: the employee's KRAs + their self-appraisal narratives. Output:
 // strengths / improvement-areas prose. Ratings are NEVER suggested — the
@@ -83,7 +98,7 @@ router.post('/midyear-draft', async (req, res) => {
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (!isSelf && emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
 
-    const c = await activeCycle(T(req));
+    const c = await activeCycleForMidyear(T(req));
     if (!c) return res.status(409).json({ error: 'No active cycle' });
     const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, employee_id])).rows[0];
     const kras = sheet ? (await db.query(`SELECT title, weight, measures FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows : [];

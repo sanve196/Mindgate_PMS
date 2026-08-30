@@ -73,8 +73,19 @@ function MyMidYearCard() {
   };
   const submit = async () => {
     setErr(null);
-    try { await api('/pms/my/midyear-review/submit', { method: 'POST' }); load(); }
-    catch (e) { setErr(e.message); }
+    // Found live: clicking "Save & sign" right after typing could submit
+    // before the debounced autosave (scheduleSave, 1200ms) had actually
+    // landed — the backend would then see the OLD narrative (often still
+    // empty) and reject the submit with "Add your reflection before
+    // signing," even though the employee had clearly just typed one.
+    // Flushing the current values first, and cancelling any pending
+    // timer, removes that race entirely.
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    try {
+      await persist({ self_rating: selfRating || null, self_narrative: selfNarrative });
+      await api('/pms/my/midyear-review/submit', { method: 'POST' });
+      load();
+    } catch (e) { setErr(e.message); }
   };
 
   if (err && !data) return <div className="card p-4"><p className="text-sm text-rose-600">{err}</p></div>;
@@ -144,6 +155,7 @@ function MyMidYearCard() {
           <textarea className="inp" rows={4} placeholder="Reflect on progress this half — highlights, challenges, focus for next half."
             disabled={!editable} value={selfNarrative} onChange={(e) => { setSelfNarrative(e.target.value); scheduleSave(e.target.value); }} />
           <div className="flex items-center gap-2">
+            {editable && <button className="btn-sec" onClick={() => { if (timer.current) clearTimeout(timer.current); persist({ self_rating: selfRating || null, self_narrative: selfNarrative }); }}>Save</button>}
             {editable && <button className="btn-pri" onClick={submit}><Send size={12} className="inline mr-1" />Save & sign</button>}
             {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
           </div>
@@ -223,8 +235,12 @@ function TeamMidYearDetail({ employeeId }) {
   };
   const submit = async () => {
     setErr(null);
-    try { await api(`/pms/team/midyear-review/${employeeId}/submit`, { method: 'POST' }); load(); }
-    catch (e) { setErr(e.message); }
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    try {
+      await persist({ manager_rating: managerRating || null, manager_narrative: managerNarrative });
+      await api(`/pms/team/midyear-review/${employeeId}/submit`, { method: 'POST' });
+      load();
+    } catch (e) { setErr(e.message); }
   };
 
   if (err && !data) return <p className="border-t border-navy-100 p-4 text-xs text-rose-600">{err}</p>;
@@ -275,6 +291,7 @@ function TeamMidYearDetail({ employeeId }) {
       <textarea className="inp" rows={3} placeholder="Your narrative for this employee's mid-year progress."
         disabled={!editable} value={managerNarrative} onChange={(e) => { setManagerNarrative(e.target.value); scheduleSave(e.target.value); }} />
       <div className="flex items-center gap-2">
+        {editable && <button className="btn-sec" onClick={() => { if (timer.current) clearTimeout(timer.current); persist({ manager_rating: managerRating || null, manager_narrative: managerNarrative }); }}>Save</button>}
         {editable && <button className="btn-pri" onClick={submit}><Send size={12} className="inline mr-1" />Save & sign</button>}
         {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
       </div>
