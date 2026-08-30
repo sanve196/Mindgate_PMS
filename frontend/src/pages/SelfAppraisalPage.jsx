@@ -2,15 +2,23 @@ import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Trash2, Download } from 'lucide-react';
 import { api, phaseLabel, phaseColor, API_BASE } from '../utils/api';
 
+// The overall rating is a weighted average of the per-KRA picks below, so
+// it's usually fractional (e.g. 3.7) — this finds the CLOSEST scale entry
+// to label it with, rather than requiring an exact match (unlike a
+// directly-picked rating, which is always exactly one of the scale's
+// values already).
+function ratingLabel(value, scale) {
+  if (value == null || !Array.isArray(scale) || !scale.length) return null;
+  let closest = scale[0];
+  for (const s of scale) { if (Math.abs(s.value - value) < Math.abs(closest.value - value)) closest = s; }
+  return closest.label;
+}
+
 export default function SelfAppraisalPage() {
   const [data, setData] = useState(null);
   const [entries, setEntries] = useState({});
   const [f, setF] = useState({ went_well: '', could_improve: '' });
-  // Found missing live, with a screenshot: the overall self-rating
-  // (A+/A/B+/B/C/D) was already fully wired up server-side —
-  // pms.self_appraisals.overall_self_rating, GET already returning
-  // cycle.rating_scale for it — just no control on this page to set it.
-  const [overallRating, setOverallRating] = useState('');
+  const [overallRating, setOverallRating] = useState(null);
   const [state, setState] = useState('idle');
   const [err, setErr] = useState(null);
   const timer = useRef(null);
@@ -21,14 +29,14 @@ export default function SelfAppraisalPage() {
       if (r.appraisal) {
         setEntries(r.appraisal.entries || {});
         setF({ went_well: r.appraisal.went_well || '', could_improve: r.appraisal.could_improve || '' });
-        setOverallRating(r.appraisal.overall_self_rating ?? '');
+        setOverallRating(r.appraisal.overall_self_rating ?? null);
       }
     }).catch(e => setErr(e.message));
   }, []);
 
   const persist = async (patch) => {
     setState('saving');
-    try { await api('/pms/my/self-appraisal', { method: 'PUT', body: JSON.stringify(patch) }); setState('saved'); }
+    try { const r = await api('/pms/my/self-appraisal', { method: 'PUT', body: JSON.stringify(patch) }); setOverallRating(r.overall_self_rating ?? null); setState('saved'); }
     catch (e) { setState('error'); setErr(e.message); }
   };
   const queue = (patch) => {
@@ -40,8 +48,15 @@ export default function SelfAppraisalPage() {
     const next = { ...entries, [kraId]: { ...(entries[kraId] || {}), [k]: e.target.value } };
     setEntries(next); queue({ entries: next });
   };
+  // Requested: a rating scale per KRA, not one free-standing overall pick
+  // — clicking a KRA's chip saves immediately (not debounced, since it's
+  // a single click, not typed text) and the server recomputes the
+  // weighted-average overall from every KRA's self_rating right away.
+  const setKraRating = (kraId, value) => {
+    const next = { ...entries, [kraId]: { ...(entries[kraId] || {}), self_rating: value } };
+    setEntries(next); persist({ entries: next });
+  };
   const setField = (k) => (e) => { const next = { ...f, [k]: e.target.value }; setF(next); queue({ [k]: e.target.value }); };
-  const pickRating = (value) => { setOverallRating(value); persist({ overall_self_rating: value }); };
 
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
@@ -60,15 +75,16 @@ export default function SelfAppraisalPage() {
         {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
-      <div className="card p-3 space-y-1.5">
-        <label className="lbl mb-0">Self-rating</label>
-        <div className="flex flex-wrap gap-1.5">
-          {(data.cycle.rating_scale || []).map(s => (
-            <button key={s.value} type="button" disabled={!open}
-              className={`chip ${Number(overallRating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
-              onClick={() => pickRating(s.value)}>{s.label}</button>
-          ))}
-        </div>
+      <div className="card p-3 space-y-1">
+        <label className="lbl mb-0">Overall self-rating (weighted average of the KRAs below)</label>
+        {overallRating != null ? (
+          <div className="flex items-baseline gap-2">
+            <span className="text-lg font-bold text-navy-700">{ratingLabel(overallRating, data.cycle.rating_scale)}</span>
+            <span className="text-xs text-navy-400">({Number(overallRating).toFixed(1)})</span>
+          </div>
+        ) : (
+          <p className="text-xs text-navy-400">Rate each KRA below to see your overall average here.</p>
+        )}
       </div>
       {!data.kras.length && <div className="card p-4 text-sm text-amber-700 bg-amber-50 border-amber-200">No approved KRAs found — complete KRA setting first.</div>}
       {data.kras.map(k => (
@@ -76,6 +92,13 @@ export default function SelfAppraisalPage() {
           <div className="flex justify-between items-baseline">
             <p className="text-sm font-semibold">{k.title}</p>
             <span className="text-[11px] text-navy-400">{k.weight}%</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(data.cycle.rating_scale || []).map(s => (
+              <button key={s.value} type="button" disabled={!open}
+                className={`chip ${Number((entries[k.id] || {}).self_rating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
+                onClick={() => setKraRating(k.id, s.value)}>{s.label}</button>
+            ))}
           </div>
           <textarea className="inp" rows={3} placeholder="What you achieved against this KRA — be specific, name evidence"
             value={(entries[k.id] || {}).narrative || ''} onChange={setEntry(k.id, 'narrative')} disabled={!open} />

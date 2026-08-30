@@ -38,6 +38,14 @@ before(async () => {
     [t.id, scale])).rows[0];
   cycleId = cycle.id;
 
+  // Second employee, with an approved KRA sheet (2 KRAs, 60/40 weights) —
+  // for the weighted-average test below.
+  const emp2 = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'SAR Emp2','sar-emp2@x.com','active') RETURNING id`, [t.id])).rows[0];
+  await db.query(`INSERT INTO core.local_credentials (tenant_id, email, password_hash) VALUES ($1,'sar-emp2@x.com',$2)`, [t.id, await bcrypt.hash('pass', 10)]);
+  const sheet2 = (await db.query(`INSERT INTO pms.kra_sheets (tenant_id, cycle_id, employee_id, status) VALUES ($1,$2,$3,'approved') RETURNING id`, [t.id, cycle.id, emp2.id])).rows[0];
+  await db.query(`INSERT INTO pms.kras (tenant_id, sheet_id, title, weight, sort_order) VALUES ($1,$2,'Ship the launch',60,10)`, [t.id, sheet2.id]);
+  await db.query(`INSERT INTO pms.kras (tenant_id, sheet_id, title, weight, sort_order) VALUES ($1,$2,'Support the team',40,20)`, [t.id, sheet2.id]);
+
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -92,4 +100,33 @@ test('omitting overall_self_rating on an unrelated PUT leaves the existing ratin
   const get = await api('/pms/my/self-appraisal', token);
   assert.equal(Number(get.body.appraisal.overall_self_rating), 5, 'still the value set two tests ago');
   assert.equal(get.body.appraisal.went_well, 'Shipped the launch on time.');
+});
+
+// Requested: a rating scale per KRA, with the overall DERIVED as the
+// weighted average of those — not a separately, manually picked value.
+test('overall_self_rating is auto-computed as the weighted average of per-KRA ratings, not manually set', { skip }, async () => {
+  const { token } = await login('sar-emp2@x.com');
+  await api('/pms/my/self-appraisal', token); // auto-creates the appraisal row, same as the page does on load
+  const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=(SELECT id FROM core.employees WHERE email='sar-emp2@x.com')`, [cycleId])).rows[0];
+  const kras = (await db.query(`SELECT id, weight FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows;
+  assert.equal(kras.length, 2);
+
+  const entries = { [kras[0].id]: { self_rating: 5, narrative: 'Great work' }, [kras[1].id]: { self_rating: 3, narrative: 'Solid' } };
+  const put = await api('/pms/my/self-appraisal', token, { method: 'PUT', body: JSON.stringify({ entries }) });
+  assert.equal(put.status, 200);
+  // KRA weights are 60/40 — 5*0.6 + 3*0.4 = 4.2
+  assert.equal(Number(put.body.overall_self_rating), 4.2);
+
+  const get = await api('/pms/my/self-appraisal', token);
+  assert.equal(Number(get.body.appraisal.overall_self_rating), 4.2, 'persisted, not just returned once');
+  assert.equal(get.body.appraisal.entries[kras[0].id].self_rating, 5, 'the per-KRA rating is stored alongside the narrative');
+});
+
+test('a fractional computed average is accepted even though it is not an exact scale value', { skip }, async () => {
+  // 4.2 above is itself proof of this, but confirmed explicitly: a direct
+  // overall_self_rating of 4.2 would be REJECTED by validateRating (not an
+  // exact scale entry) — the computed path must not go through that check.
+  const { token } = await login('sar-emp2@x.com');
+  const rejected = await api('/pms/my/self-appraisal', token, { method: 'PUT', body: JSON.stringify({ overall_self_rating: 4.2 }) });
+  assert.equal(rejected.status, 422, 'a MANUALLY-sent 4.2 is still correctly rejected — only the computed path allows fractional values');
 });

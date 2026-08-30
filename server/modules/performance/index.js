@@ -739,19 +739,34 @@ router.put('/my/self-appraisal', async (req, res) => {
     if (!a) return res.status(404).json({ error: 'GET /my/self-appraisal first' });
     if (a.status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
     const b = req.body || {};
-    // Found missing: the self-rating field was fully wired up server-side
-    // (this column, GET already returning cycle.rating_scale for it) but
-    // had no UI control on the Self-Appraisal page at all — added here,
-    // reused directly from Mid-Year Review's validation for consistency.
-    const rv = validateRating(b.overall_self_rating, c.rating_scale);
-    if (!rv.ok) return res.status(422).json({ error: rv.reason });
+    // Requested: a rating scale per KRA (not just one free-standing
+    // "overall" pick), with the overall derived as the WEIGHTED AVERAGE
+    // of those — reusing computeWeightedRating (the same weighted-average
+    // math the 7-parameter annual engine already uses and has tests for),
+    // just fed KRA weights + entries[*].self_rating instead of
+    // organizational parameters. This is why overall_self_rating is
+    // computed here, not taken from validateRating's discrete-match check
+    // — an average of discrete grades is legitimately fractional (e.g.
+    // 3.7), and that's correct, not an invalid value.
+    let overallRating = a.overall_self_rating;
+    if (b.entries) {
+      const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+      const kras = sheet ? (await db.query(`SELECT id, weight AS weight_pct FROM pms.kras WHERE sheet_id=$1`, [sheet.id])).rows : [];
+      const scores = new Map(kras.map((k) => [k.id, b.entries[k.id] ? b.entries[k.id].self_rating : null]));
+      const { rating } = computeWeightedRating(kras, scores);
+      if (rating != null) overallRating = rating;
+    } else if (b.overall_self_rating != null) {
+      const rv = validateRating(b.overall_self_rating, c.rating_scale);
+      if (!rv.ok) return res.status(422).json({ error: rv.reason });
+      overallRating = rv.value;
+    }
     await db.query(
       `UPDATE pms.self_appraisals SET status='in_progress',
-         entries=COALESCE($2,entries), overall_self_rating=COALESCE($3,overall_self_rating),
+         entries=COALESCE($2,entries), overall_self_rating=$3,
          went_well=COALESCE($4,went_well), could_improve=COALESCE($5,could_improve), updated_at=now()
        WHERE id=$1`,
-      [a.id, b.entries ? JSON.stringify(b.entries) : null, rv.value, b.went_well ?? null, b.could_improve ?? null]);
-    res.json({ ok: true });
+      [a.id, b.entries ? JSON.stringify(b.entries) : null, overallRating, b.went_well ?? null, b.could_improve ?? null]);
+    res.json({ ok: true, overall_self_rating: overallRating });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
