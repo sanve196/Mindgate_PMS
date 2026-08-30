@@ -49,11 +49,10 @@ function Row({ q, editable, reload }) {
       <td className="px-3 py-2 text-right font-mono">{q.manager_rating}</td>
       <td className="px-3 py-2 text-right">
         {q.hod_status === 'submitted' ? <span className="font-mono">{q.hod_rating}</span> :
-          // max=6 to match the midyear cycle's 6-point letter-grade scale
-          // (A+..D) — annual cycles never actually reach above 5 (their
-          // rating comes from the separate 7-parameter engine), so this
-          // is a harmless ceiling for them, just an unused one.
-          <input className="inp w-16 text-right inline-block" type="number" step="0.5" min="1" max="6" value={v} onChange={e => setV(e.target.value)} disabled={!editable} />}
+          // max=5 to match the 5-point letter-grade scale (A+..C) — was
+          // briefly 6 for an earlier 6-grade version, reverted along with
+          // narrowing the default scale back down.
+          <input className="inp w-16 text-right inline-block" type="number" step="0.5" min="1" max="5" value={v} onChange={e => setV(e.target.value)} disabled={!editable} />}
       </td>
       <td className="px-3 py-2 text-right">
         {q.hod_status !== 'submitted' && editable && <button className="btn-pri" onClick={() => save(true)}>Submit</button>}

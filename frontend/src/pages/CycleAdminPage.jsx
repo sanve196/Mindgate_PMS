@@ -41,6 +41,24 @@ export default function CycleAdminPage() {
     try { await api(`/pms/cycles/${c.id}/phase`, { method: 'POST', body: JSON.stringify({ cancel: true }) }); load(); }
     catch (e) { setErr(e.message); }
   };
+  // Lets a cycle created under an earlier default (e.g. the old 6-grade
+  // A+/A/B+/B/C/D scale) actually switch to the current one — otherwise
+  // narrowing the DEFAULT only affects brand new cycles, leaving anything
+  // already in progress stuck on whatever it started with.
+  const resetRatingScale = async (c) => {
+    if (!confirm(`Reset "${c.name}"'s rating scale to the current default (A+, A, B+, B, C)? Any ratings already entered on the old scale will keep their number, just re-labelled.`)) return;
+    setErr(null);
+    try {
+      await api(`/pms/cycles/${c.id}/rating-scale`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          rating_scale: [{ value: 5, label: 'A+' }, { value: 4, label: 'A' }, { value: 3, label: 'B+' }, { value: 2, label: 'B' }, { value: 1, label: 'C' }],
+          bell_curve: { '5': 5, '4': 15, '3': 35, '2': 30, '1': 15 },
+        }),
+      });
+      load();
+    } catch (e) { setErr(e.message); }
+  };
 
   if (err && !cycles) return <p className="text-sm text-rose-600">{err}</p>;
   if (!cycles) return <p className="text-sm text-navy-400">Loading…</p>;
@@ -82,6 +100,9 @@ export default function CycleAdminPage() {
                 {next && <button className="btn-pri" onClick={() => phase(c, next, false)}><ArrowRight size={13} className="inline mr-1" />Advance to {phaseLabel(next)}</button>}
                 {prev && <button className="btn-sec" onClick={() => phase(c, prev, true)}><RotateCcw size={13} className="inline mr-1" />Roll back to {phaseLabel(prev)}</button>}
                 {c.phase === 'publish' && <button className="btn-pri !bg-emerald-700" disabled={busy} onClick={publish}><Rocket size={13} className="inline mr-1" />Publish ratings</button>}
+                {(c.rating_scale || []).some(s => s.value === 6) && (
+                  <button className="btn-sec" onClick={() => resetRatingScale(c)}>Update to 5-grade scale (A+-C)</button>
+                )}
                 <button className="btn-sec !text-rose-600 !border-rose-200" onClick={() => cancelCycle(c)}><Trash2 size={13} className="inline mr-1" />Cancel cycle</button>
               </div>
             )}
@@ -183,8 +204,8 @@ function NewCycleModal({ onClose, onCreated }) {
           </div>
           <div className="bg-navy-50 rounded-xl p-3 text-xs text-navy-500 space-y-1">
             <p className="flex items-center gap-1.5 font-semibold text-navy-600"><Info size={13} />Defaults applied</p>
-            <p><b>Rating scale:</b> A+, A, B+, B, C, D</p>
-            <p><b>Bell curve:</b> A+ 5% · A 15% · B+ 35% · B 30% · C 10% · D 5%</p>
+            <p><b>Rating scale:</b> A+, A, B+, B, C</p>
+            <p><b>Bell curve:</b> A+ 5% · A 15% · B+ 35% · B 30% · C 15%</p>
             <p className="text-navy-400">These can be adjusted after creation.</p>
           </div>
           {err && <p className="text-xs text-rose-600">{err}</p>}

@@ -88,27 +88,48 @@ router.post('/cycles', async (req, res) => {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
     const { name, fiscal_year, cycle_type, description, rating_scale, bell_curve, opens_at, closes_at, pip_threshold } = req.body || {};
     if (!name || !fiscal_year) return res.status(400).json({ error: 'name and fiscal_year required' });
-    // Default rating scale switched from numeric 1-5 labels to letter
-    // grades (A+/A/B+/B/C/D) per explicit request, after flagging the
-    // ripple this causes — values stay numeric (1-6) underneath so
-    // existing math (weighted rating, bell curve, calibration adjustments)
-    // keeps working unchanged; only the LABELS shown to people changed,
-    // plus the scale widened from 5 to 6 points to fit 6 letter grades.
-    // Bell curve percentages (5/15/35/30/10/5) are exactly the mockup's own
-    // numbers for A+/A/B+/B/C/D, not invented separately.
-    // See rating-rules.js for the Super 50 (BR-6.5) A/A+ mapping, updated
-    // to match (top tier = 5 or 6, "A+" specifically = 6).
+    // Default rating scale: 5 letter grades, A+ down to C (values 5-1) —
+    // narrowed from an earlier 6-grade A+/A/B+/B/C/D version per a direct
+    // follow-up request to drop D and match a plain 1-5 range. Bell curve
+    // folds the old D bucket's 5% into C (was 10%, now 15%) rather than
+    // inventing new numbers from scratch.
+    // See rating-rules.js for the Super 50 (BR-6.5) A/A+ mapping — that
+    // logic is intentionally untouched here: it's tied to the SEPARATE
+    // 7-parameter weighted engine's own 1-5 range (BR-6.2/6.3), never to
+    // this cycle-level rating_scale, so it needed no change for this.
     const r = await db.query(
       `INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, description, rating_scale, bell_curve, opens_at, closes_at, pip_threshold, created_by)
        VALUES ($1,$2,$3,COALESCE($4,'annual'),$5,COALESCE($6,DEFAULT),COALESCE($7,DEFAULT),$8,$9,COALESCE($10,DEFAULT),$11) RETURNING *`
-        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '[{"value":6,"label":"A+"},{"value":5,"label":"A"},{"value":4,"label":"B+"},{"value":3,"label":"B"},{"value":2,"label":"C"},{"value":1,"label":"D"}]'::jsonb)`)
-        .replace('COALESCE($7,DEFAULT)', `COALESCE($7, '{"6":5,"5":15,"4":35,"3":30,"2":10,"1":5}'::jsonb)`)
+        .replace('COALESCE($6,DEFAULT)', `COALESCE($6, '[{"value":5,"label":"A+"},{"value":4,"label":"A"},{"value":3,"label":"B+"},{"value":2,"label":"B"},{"value":1,"label":"C"}]'::jsonb)`)
+        .replace('COALESCE($7,DEFAULT)', `COALESCE($7, '{"5":5,"4":15,"3":35,"2":30,"1":15}'::jsonb)`)
         .replace('COALESCE($10,DEFAULT)', `COALESCE($10, 3.0)`),
       [T(req), name, fiscal_year, cycle_type || null, description || null, rating_scale ? JSON.stringify(rating_scale) : null,
        bell_curve ? JSON.stringify(bell_curve) : null, opens_at || null, closes_at || null, pip_threshold ?? null, req.user.email]);
     audit(req, 'CYCLE_CREATED', r.rows[0].id, null, { name, fiscal_year });
     res.json({ ok: true, cycle: r.rows[0] });
   } catch (e) { logger.error('cycle create', { error: e.message }); res.status(500).json({ error: e.message }); }
+});
+
+// Lets HR update an EXISTING cycle's rating scale/bell curve — added
+// alongside narrowing the DEFAULT from 6 grades to 5, since a cycle
+// created under the old default (like one already mid-use) would
+// otherwise be stuck on it forever; this makes the change actually
+// usable without starting a brand new cycle.
+router.put('/cycles/:id/rating-scale', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const { rating_scale, bell_curve } = req.body || {};
+    if (rating_scale && (!Array.isArray(rating_scale) || rating_scale.some((s) => typeof s.value !== 'number' || !s.label))) {
+      return res.status(422).json({ error: 'rating_scale must be an array of {value:number, label:string}' });
+    }
+    const r = await db.query(
+      `UPDATE pms.cycles SET rating_scale=COALESCE($1,rating_scale), bell_curve=COALESCE($2,bell_curve), updated_at=now()
+       WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [rating_scale ? JSON.stringify(rating_scale) : null, bell_curve ? JSON.stringify(bell_curve) : null, req.params.id, T(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'cycle not found' });
+    audit(req, 'CYCLE_RATING_SCALE_UPDATED', req.params.id, null, { rating_scale, bell_curve });
+    res.json({ ok: true, cycle: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // BR-7.1: threshold is configurable by HR, per cycle — see migrations/006-pip.js
