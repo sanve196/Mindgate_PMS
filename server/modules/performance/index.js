@@ -727,7 +727,7 @@ router.get('/my/self-appraisal', async (req, res) => {
       [T(req), c.id, req.user.id])).rows[0];
     const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
     const kras = sheet ? (await db.query(`SELECT id, title, weight FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows : [];
-    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase, rating_scale: c.rating_scale }, appraisal: a, kras });
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase, cycle_type: c.cycle_type, rating_scale: c.rating_scale }, appraisal: a, kras });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -748,14 +748,21 @@ router.put('/my/self-appraisal', async (req, res) => {
     // computed here, not taken from validateRating's discrete-match check
     // — an average of discrete grades is legitimately fractional (e.g.
     // 3.7), and that's correct, not an invalid value.
+    //
+    // UPDATED: on an ANNUAL cycle, overall_self_rating is now exclusively
+    // driven by the 7-parameter self-scoring (PUT /my/parameter-scores),
+    // same as the manager's overall_rating is exclusively driven by the
+    // manager's 7-parameter scoring — the per-KRA average below is left
+    // for non-annual cycles only, so the two computations never fight
+    // over the same column.
     let overallRating = a.overall_self_rating;
-    if (b.entries) {
+    if (b.entries && c.cycle_type !== 'annual') {
       const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
       const kras = sheet ? (await db.query(`SELECT id, weight AS weight_pct FROM pms.kras WHERE sheet_id=$1`, [sheet.id])).rows : [];
       const scores = new Map(kras.map((k) => [k.id, b.entries[k.id] ? b.entries[k.id].self_rating : null]));
       const { rating } = computeWeightedRating(kras, scores);
       if (rating != null) overallRating = rating;
-    } else if (b.overall_self_rating != null) {
+    } else if (b.overall_self_rating != null && c.cycle_type !== 'annual') {
       const rv = validateRating(b.overall_self_rating, c.rating_scale);
       if (!rv.ok) return res.status(422).json({ error: rv.reason });
       overallRating = rv.value;
@@ -777,6 +784,17 @@ router.post('/my/self-appraisal/submit', async (req, res) => {
     const a = (await db.query(`SELECT * FROM pms.self_appraisals WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
     if (!a) return res.status(404).json({ error: 'nothing to submit' });
     if (a.status === 'submitted') return res.status(409).json({ error: 'already submitted' });
+    // Requested: on an annual cycle, the employee must complete their
+    // 7-parameter self-scoring before they can submit — mirrors the
+    // manager side, where overall_rating (from the SAME 7 parameters)
+    // must be complete before the manager's own evaluation submits.
+    if (c.cycle_type === 'annual') {
+      const params = (await db.query(`SELECT id, weight_pct FROM pms.review_parameters WHERE tenant_id=$1 AND active=true`, [T(req)])).rows;
+      const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='self'`, [T(req), c.id, req.user.id])).rows;
+      const scoreMap = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
+      const weighted = computeWeightedRating(params, scoreMap);
+      if (!weighted.complete) return res.status(422).json({ error: `Score all 7 organisational parameters before submitting (${weighted.missing.length} remaining)` });
+    }
     await db.query(`UPDATE pms.self_appraisals SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1`, [a.id]);
     audit(req, 'SELF_APPRAISAL_SUBMITTED', c.id, req.user.id, null);
     res.json({ ok: true });
@@ -1199,10 +1217,14 @@ router.get('/team/parameter-scores/:employeeId', async (req, res) => {
     if (!emp) return res.status(404).json({ error: 'employee not found' });
     if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
     const params = (await db.query(`SELECT id, name, weight_pct, sort_order FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [T(req)])).rows;
-    const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, emp.id])).rows;
+    // scored_by_role='manager' — migration 021 let self and manager scores
+    // coexist per parameter; this view is the manager's own only.
+    const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='manager'`, [T(req), c.id, emp.id])).rows;
+    const selfScored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='self'`, [T(req), c.id, emp.id])).rows;
     const scoreMap = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
+    const selfScoreMap = Object.fromEntries(selfScored.map((s) => [s.parameter_id, Number(s.score)]));
     const weighted = computeWeightedRating(params, scoreMap);
-    res.json({ employee: { id: emp.id, name: emp.name }, parameters: params, scores: scoreMap, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing });
+    res.json({ employee: { id: emp.id, name: emp.name }, parameters: params, scores: scoreMap, self_scores: selfScoreMap, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1235,12 +1257,12 @@ router.put('/team/parameter-scores/:employeeId', async (req, res) => {
     }
     for (const [pid, val] of Object.entries(scores)) {
       await db.query(
-        `INSERT INTO pms.parameter_scores (tenant_id, cycle_id, employee_id, parameter_id, score, scored_by)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (cycle_id, employee_id, parameter_id) DO UPDATE SET score=EXCLUDED.score, scored_by=EXCLUDED.scored_by, updated_at=now()`,
+        `INSERT INTO pms.parameter_scores (tenant_id, cycle_id, employee_id, parameter_id, score, scored_by, scored_by_role)
+         VALUES ($1,$2,$3,$4,$5,$6,'manager')
+         ON CONFLICT (cycle_id, employee_id, parameter_id, scored_by_role) DO UPDATE SET score=EXCLUDED.score, scored_by=EXCLUDED.scored_by, updated_at=now()`,
         [T(req), c.id, emp.id, pid, Number(val), req.user.email]);
     }
-    const allScored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, emp.id])).rows;
+    const allScored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='manager'`, [T(req), c.id, emp.id])).rows;
     const scoreMap = Object.fromEntries(allScored.map((s) => [s.parameter_id, Number(s.score)]));
     const weighted = computeWeightedRating(params, scoreMap);
     if (weighted.complete) {
@@ -1251,6 +1273,67 @@ router.put('/team/parameter-scores/:employeeId', async (req, res) => {
         [T(req), c.id, emp.id, req.user.id, weighted.rating]);
     }
     audit(req, 'PARAMETER_SCORES_UPDATED', c.id, emp.id, { scores, complete: weighted.complete, weighted_rating: weighted.rating });
+    res.json({ ok: true, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Requested with a reference screenshot: an employee's own Self-Appraisal
+// had no way to self-score against the same 7 Organizational Parameters
+// the manager scores against — only the manager could. This is the
+// employee's own mirror of the two routes above, writing to the SAME
+// pms.parameter_scores table (migration 021 added scored_by_role so both
+// coexist per parameter without overwriting each other) but into
+// pms.self_appraisals.overall_self_rating once complete, instead of
+// pms.manager_evaluations.overall_rating — the self-score never becomes
+// the OFFICIAL rating; that stays exclusively the manager's, per
+// BR-6.2/6.3. Annual-cycle only, same restriction as the manager route.
+router.get('/my/parameter-scores', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c) return res.status(409).json({ error: 'No active cycle' });
+    if (c.cycle_type !== 'annual') return res.status(409).json({ error: '7-parameter scoring applies to annual cycles only' });
+    const params = (await db.query(`SELECT id, name, weight_pct, sort_order FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [T(req)])).rows;
+    const scored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='self'`, [T(req), c.id, req.user.id])).rows;
+    const scoreMap = Object.fromEntries(scored.map((s) => [s.parameter_id, Number(s.score)]));
+    const weighted = computeWeightedRating(params, scoreMap);
+    const editable = pm.phaseAllows(c.phase, 'self_edit');
+    res.json({ parameters: params, scores: scoreMap, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing, editable });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/my/parameter-scores', async (req, res) => {
+  try {
+    const c = await activeCycle(T(req));
+    if (!c || !pm.phaseAllows(c.phase, 'self_edit')) return res.status(409).json({ error: `Self-appraisal is not open (phase: ${c ? c.phase : 'none'})` });
+    if (c.cycle_type !== 'annual') return res.status(409).json({ error: '7-parameter scoring applies to annual cycles only' });
+    const a = (await db.query(`SELECT status FROM pms.self_appraisals WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.user.id])).rows[0];
+    if (a && a.status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
+    const { scores } = req.body || {};
+    if (!scores || typeof scores !== 'object') return res.status(400).json({ error: 'scores object required, e.g. {"<parameter_id>": 4}' });
+    const params = (await db.query(`SELECT id, name, weight_pct FROM pms.review_parameters WHERE tenant_id=$1 AND active=true`, [T(req)])).rows;
+    const validIds = new Set(params.map((p) => p.id));
+    for (const [pid, val] of Object.entries(scores)) {
+      if (!validIds.has(pid)) return res.status(400).json({ error: `unknown parameter_id: ${pid}` });
+      const n = Number(val);
+      if (Number.isNaN(n) || n < 1 || n > 5) return res.status(400).json({ error: `score for ${pid} must be a number between 1 and 5` });
+    }
+    for (const [pid, val] of Object.entries(scores)) {
+      await db.query(
+        `INSERT INTO pms.parameter_scores (tenant_id, cycle_id, employee_id, parameter_id, score, scored_by, scored_by_role)
+         VALUES ($1,$2,$3,$4,$5,$6,'self')
+         ON CONFLICT (cycle_id, employee_id, parameter_id, scored_by_role) DO UPDATE SET score=EXCLUDED.score, scored_by=EXCLUDED.scored_by, updated_at=now()`,
+        [T(req), c.id, req.user.id, pid, Number(val), req.user.email]);
+    }
+    const allScored = (await db.query(`SELECT parameter_id, score FROM pms.parameter_scores WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3 AND scored_by_role='self'`, [T(req), c.id, req.user.id])).rows;
+    const scoreMap = Object.fromEntries(allScored.map((s) => [s.parameter_id, Number(s.score)]));
+    const weighted = computeWeightedRating(params, scoreMap);
+    if (weighted.complete) {
+      await db.query(
+        `INSERT INTO pms.self_appraisals (tenant_id, cycle_id, employee_id, overall_self_rating, status)
+         VALUES ($1,$2,$3,$4,'in_progress')
+         ON CONFLICT (cycle_id, employee_id) DO UPDATE SET overall_self_rating=$4, status=CASE WHEN pms.self_appraisals.status='not_started' THEN 'in_progress' ELSE pms.self_appraisals.status END, updated_at=now()`,
+        [T(req), c.id, req.user.id, weighted.rating]);
+    }
     res.json({ ok: true, weighted_rating: weighted.rating, complete: weighted.complete, missing: weighted.missing });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
