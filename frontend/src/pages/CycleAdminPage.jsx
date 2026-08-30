@@ -215,6 +215,7 @@ function ReviewParametersConfig() {
 
   const total = rows.reduce((s, r) => s + (Number(r.weight_pct) || 0), 0);
   const validTotal = Math.abs(total - 100) < 0.01;
+  const blankCount = rows.filter(r => !r.name.trim()).length;
 
   const update = (i, field, value) => setRows(rs => rs.map((r, j) => j === i ? { ...r, [field]: value } : r));
   const remove = (i) => setRows(rs => rs.filter((_, j) => j !== i));
@@ -222,28 +223,55 @@ function ReviewParametersConfig() {
 
   const save = async () => {
     setErr(null); setSaved(false);
-    if (rows.some(r => !r.name.trim())) { setErr('Every parameter needs a name.'); return; }
+    if (rows.some(r => !r.name.trim())) { setErr('Every parameter needs a name — see the rows highlighted in red below.'); return; }
     try {
       await api('/pms/review-parameters', { method: 'PUT', body: JSON.stringify({ parameters: rows.map(r => ({ id: r.id, name: r.name, weight_pct: Number(r.weight_pct) })) }) });
       setSaved(true); load();
     } catch (e) { setErr(e.message); }
   };
 
+  // Rebuilt with an explicit table layout (grid-template-columns) rather
+  // than flex-1/fixed-width siblings sharing a row — found live, per a
+  // screenshot: the name column was rendering collapsed to a sliver next
+  // to an oversized weight column, making every parameter's name
+  // unreadable. A fixed column grid removes any ambiguity about how much
+  // space each field gets, and a persistent header row labels each
+  // column once instead of relying only on per-row placeholder text.
   return (
     <div className="card p-4 space-y-3">
       <div>
         <p className="font-bold text-sm">7 Organizational Parameters</p>
         <p className="text-xs text-navy-400">Used to compute the weighted overall rating on annual-cycle evaluations (BR-6.2/6.3). Weights must sum to 100.</p>
       </div>
-      <div className="space-y-1.5">
-        {rows.map((r, i) => (
-          <div key={r.id || i} className="flex items-center gap-2">
-            <input className="inp flex-1" value={r.name} onChange={e => update(i, 'name', e.target.value)} placeholder="Parameter name" />
-            <input className="inp w-20 text-right" type="number" step="0.5" min="0" value={r.weight_pct} onChange={e => update(i, 'weight_pct', e.target.value)} />
-            <span className="text-xs text-navy-400">%</span>
-            <button className="btn-sec !p-1.5" onClick={() => remove(i)}><Trash2 size={13} /></button>
-          </div>
-        ))}
+      {blankCount > 0 && (
+        <p className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+          {blankCount} parameter{blankCount === 1 ? '' : 's'} {blankCount === 1 ? 'has' : 'have'} no name set — highlighted below. Type a name for each before saving.
+        </p>
+      )}
+      <div className="grid gap-1.5" style={{ gridTemplateColumns: '2.5rem 1fr 7rem 2rem' }}>
+        <span className="lbl mb-0">#</span>
+        <span className="lbl mb-0">Parameter Name</span>
+        <span className="lbl mb-0 text-right">Weight %</span>
+        <span></span>
+        {rows.map((r, i) => {
+          const blank = !r.name.trim();
+          return (
+            <div key={r.id || i} className="contents">
+              <div className="flex items-center justify-center text-xs font-semibold text-navy-400">{i + 1}</div>
+              <input
+                className={`inp ${blank ? '!border-rose-300 !bg-rose-50/50' : ''}`}
+                value={r.name}
+                onChange={e => update(i, 'name', e.target.value)}
+                placeholder="e.g. Client Delivery Excellence"
+              />
+              <div className="flex items-center gap-1">
+                <input className="inp text-right" type="number" step="0.5" min="0" value={r.weight_pct} onChange={e => update(i, 'weight_pct', e.target.value)} />
+                <span className="text-xs text-navy-400">%</span>
+              </div>
+              <button className="btn-sec !p-1.5 justify-self-start" onClick={() => remove(i)} title="Remove parameter"><Trash2 size={13} /></button>
+            </div>
+          );
+        })}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-sec" onClick={add}><Plus size={13} className="inline mr-1" />Add parameter</button>
