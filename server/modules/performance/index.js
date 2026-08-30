@@ -215,13 +215,30 @@ router.get('/team/kra-sheets', async (req, res) => {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const c = await activeCycle(T(req));
     if (!c) return res.json({ cycle: null, sheets: [] });
+    // Found live: a manager's direct reports could be entirely missing
+    // from this list even after submitting a KRA. Two compounding causes,
+    // both fixed here:
+    // (1) This started FROM pms.kra_sheets (inner join), so any report
+    //     who hadn't yet touched their own KRA page — no sheet row exists
+    //     until they do — never appeared at all, even though they're a
+    //     valid report. GET /team/evaluations already gets this right by
+    //     starting FROM core.employees with a LEFT JOIN; this now matches
+    //     that same, established pattern.
+    // (2) It filtered on kra_sheets.manager_id, a value SNAPSHOTTED at
+    //     sheet-creation time — if the employee's manager_id in
+    //     core.employees was ever wrong or unset at that moment (e.g. an
+    //     HRMS import whose manager_email hadn't resolved yet) and only
+    //     corrected afterwards, the sheet's stored snapshot never caught
+    //     up. Now checks the employee's CURRENT manager_id live instead.
     const r = await db.query(
-      `SELECT s.*, e.name AS employee_name, e.email AS employee_email,
-              (SELECT COUNT(*)::int FROM pms.kras k WHERE k.sheet_id=s.id) AS kra_count,
-              (SELECT COALESCE(SUM(k.weight),0) FROM pms.kras k WHERE k.sheet_id=s.id) AS total_weight
-         FROM pms.kra_sheets s JOIN core.employees e ON e.id=s.employee_id
-        WHERE s.cycle_id=$1 AND s.manager_id=$2 ORDER BY e.name`, [c.id, req.user.id]);
-    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, sheets: r.rows });
+      `SELECT e.id AS employee_id, e.name AS employee_name, e.email AS employee_email,
+              s.id, s.status, s.manager_comment,
+              COALESCE((SELECT COUNT(*)::int FROM pms.kras k WHERE k.sheet_id=s.id), 0) AS kra_count,
+              COALESCE((SELECT SUM(k.weight) FROM pms.kras k WHERE k.sheet_id=s.id), 0) AS total_weight
+         FROM core.employees e
+         LEFT JOIN pms.kra_sheets s ON s.cycle_id=$1 AND s.employee_id=e.id
+        WHERE e.tenant_id=$2 AND e.manager_id=$3 AND e.status='active' ORDER BY e.name`, [c.id, T(req), req.user.id]);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, sheets: r.rows.map((row) => ({ ...row, status: row.status || 'not_started' })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -232,7 +249,11 @@ router.post('/team/kra-sheets/:sheetId/decide', async (req, res) => {
     if (!['approved', 'returned'].includes(decision)) return res.status(400).json({ error: "decision must be 'approved' or 'returned'" });
     const s = (await db.query(`SELECT * FROM pms.kra_sheets WHERE id=$1 AND tenant_id=$2`, [req.params.sheetId, T(req)])).rows[0];
     if (!s) return res.status(404).json({ error: 'sheet not found' });
-    if (s.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')))
+    // Live check against core.employees, not the stored (possibly stale)
+    // kra_sheets.manager_id snapshot — see GET /team/kra-sheets above for
+    // why that snapshot can drift.
+    const decideEmp = (await db.query(`SELECT manager_id FROM core.employees WHERE id=$1`, [s.employee_id])).rows[0];
+    if ((!decideEmp || decideEmp.manager_id !== req.user.id) && !(await hasPermission(req.user, 'pms_admin')))
       return res.status(403).json({ error: 'Not your report' });
     if (s.status !== 'submitted') return res.status(409).json({ error: `sheet is ${s.status}, not submitted` });
     if (decision === 'returned' && !(comment && comment.trim())) return res.status(422).json({ error: 'A return needs a comment — the employee must know why' });
@@ -254,7 +275,8 @@ router.get('/team/kra-sheets/:sheetId/kras', async (req, res) => {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
     const s = (await db.query(`SELECT * FROM pms.kra_sheets WHERE id=$1 AND tenant_id=$2`, [req.params.sheetId, T(req)])).rows[0];
     if (!s) return res.status(404).json({ error: 'sheet not found' });
-    if (s.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')))
+    const viewEmp = (await db.query(`SELECT manager_id FROM core.employees WHERE id=$1`, [s.employee_id])).rows[0];
+    if ((!viewEmp || viewEmp.manager_id !== req.user.id) && !(await hasPermission(req.user, 'pms_admin')))
       return res.status(403).json({ error: 'Not your report' });
     const kras = (await db.query(`SELECT * FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [s.id])).rows;
     res.json({ sheet: s, kras, weights: pm.weightsValid(kras) });

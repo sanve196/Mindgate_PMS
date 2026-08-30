@@ -37,16 +37,26 @@ export default function TeamKraSheetsPage() {
         <span className="chip bg-navy-50 text-navy-600">{data.cycle.name}</span>
         {pendingCount > 0 && <span className="chip bg-amber-100 text-amber-700">{pendingCount} awaiting your review</span>}
       </div>
-      {!data.sheets.length && <div className="card p-8 text-center text-sm text-navy-400">No direct reports found in the employee mirror.</div>}
+      {/* Fixed: this used to say "No direct reports found in the employee
+          mirror" for an EMPTY sheets list — but that list previously came
+          from an inner join on kra_sheets, so it read empty even when
+          direct reports genuinely existed and simply hadn't touched their
+          KRA yet. Now driven by core.employees directly (see the backend
+          fix), so an empty list here means zero reports, for real. */}
+      {!data.sheets.length && <div className="card p-8 text-center text-sm text-navy-400">No direct reports found.</div>}
       {data.sheets.map(s => (
-        <div key={s.id} className="card overflow-hidden">
-          <button className="w-full flex items-center gap-2 px-4 py-3 text-left" onClick={() => setOpenId(v => v === s.id ? null : s.id)}>
-            {openId === s.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <div key={s.employee_id} className="card overflow-hidden">
+          <button className="w-full flex items-center gap-2 px-4 py-3 text-left" onClick={() => setOpenId(v => v === s.employee_id ? null : s.employee_id)}>
+            {openId === s.employee_id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <span className="text-sm font-semibold flex-1">{s.employee_name}</span>
             <span className="text-[11px] text-navy-400">{s.kra_count} KRA{s.kra_count === 1 ? '' : 's'} · {s.total_weight}%</span>
             <span className={`chip ${STATUS_COLOR[s.status] || STATUS_COLOR.not_started}`}>{s.status}</span>
           </button>
-          {openId === s.id && <SheetEditor sheet={s} reload={load} />}
+          {openId === s.employee_id && (
+            s.id
+              ? <SheetEditor sheet={s} reload={load} />
+              : <p className="border-t border-navy-100 p-4 text-xs text-navy-400">This report hasn't started their KRAs for this cycle yet — nothing to review.</p>
+          )}
         </div>
       ))}
     </div>
