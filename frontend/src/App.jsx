@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText, UserCog } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -13,6 +13,7 @@ import MyRatingPage from './pages/MyRatingPage';
 import EngagementPage from './pages/EngagementPage';
 import PeopleHubPage from './pages/PeopleHubPage';
 import DirectoryPage from './pages/DirectoryPage';
+import DepartmentHeadsPage from './pages/DepartmentHeadsPage';
 import PIPPage from './pages/PIPPage';
 import WatchlistPage from './pages/WatchlistPage';
 import NotificationBell from './pages/NotificationBell';
@@ -46,6 +47,7 @@ const NAV = [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
     { to: '/admin/directory', label: 'Employees', icon: Upload, roles: ['admin', 'hr'] },
+    { to: '/admin/department-heads', label: 'Department Heads', icon: UserCog, roles: ['admin', 'hr'] },
     { to: '/admin/kra-overview', label: 'KRA Overview', icon: ClipboardList },
     { to: '/admin/closure-letters', label: 'Closure Letters', icon: FileText },
     { to: '/admin/watchlist', label: 'Super 50', icon: Award },
@@ -131,6 +133,7 @@ export default function App() {
             <Route path="/admin/cycles" element={<CycleAdminPage />} />
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<RequireRole user={user} roles={['admin', 'hr']}><DirectoryPage /></RequireRole>} />
+            <Route path="/admin/department-heads" element={<RequireRole user={user} roles={['admin', 'hr']}><DepartmentHeadsPage /></RequireRole>} />
             <Route path="/admin/kra-overview" element={<KraOrgOverviewPage />} />
             <Route path="/admin/closure-letters" element={<ClosureLettersPage />} />
             <Route path="/admin/watchlist" element={<WatchlistPage />} />

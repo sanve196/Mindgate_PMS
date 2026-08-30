@@ -127,7 +127,6 @@ export default function DirectoryPage() {
           </div>
         )}
       </div>
-      <DepartmentHeadsPanel employees={rows} />
       {!rows ? <p className="text-sm text-navy-400">Loading…</p> : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -324,48 +323,3 @@ function EmployeePanel({ employee, onDone }) {
   );
 }
 
-// The missing piece behind a reported bug: setting someone's role to
-// "hod" grants them access to Delivery Head Review, but what THEY
-// actually see there is scoped by core.department_heads (which
-// department they head) — a completely separate assignment nothing in
-// this app ever had a UI for. Without this, an HOD's queue always shows
-// "Nothing awaiting Delivery Head review," with no way for HR to fix it.
-function DepartmentHeadsPanel({ employees }) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
-  const [msg, setMsg] = useState(null);
-
-  const load = () => api('/employees/department-heads').then(r => setData(r.departments)).catch(e => setErr(e.message));
-  useEffect(() => { load(); }, []);
-
-  const setHead = async (department, employeeId) => {
-    setErr(null); setMsg(null);
-    try {
-      await api(`/employees/department-heads/${encodeURIComponent(department)}`, { method: 'PUT', body: JSON.stringify({ employee_id: employeeId || null }) });
-      setMsg(`Updated ${department}.`); load();
-    } catch (e) { setErr(e.message); }
-  };
-
-  if (!data) return null;
-  if (!data.length) return null;
-
-  return (
-    <div className="card p-4 space-y-2">
-      <p className="lbl">Department Heads — who each department's Delivery Head Review queue belongs to</p>
-      <p className="text-[11px] text-navy-400 -mt-1">Giving someone the "hod" role only grants access to the screen; this is what actually scopes which department's evaluations they see.</p>
-      <div className="grid sm:grid-cols-2 gap-2">
-        {data.map(d => (
-          <div key={d.department} className="flex items-center justify-between gap-2 bg-navy-50 rounded-lg px-3 py-2">
-            <span className="text-xs font-semibold">{d.department}</span>
-            <select className="inp !py-1 w-48" value={d.head ? d.head.employee_id : ''} onChange={e => setHead(d.department, e.target.value)}>
-              <option value="">— no head assigned —</option>
-              {(employees || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-          </div>
-        ))}
-      </div>
-      {err && <p className="text-xs text-rose-600">{err}</p>}
-      {msg && <p className="text-xs text-emerald-600">{msg}</p>}
-    </div>
-  );
-}
