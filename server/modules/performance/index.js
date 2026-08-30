@@ -718,12 +718,18 @@ router.put('/my/self-appraisal', async (req, res) => {
     if (!a) return res.status(404).json({ error: 'GET /my/self-appraisal first' });
     if (a.status === 'submitted') return res.status(409).json({ error: 'Already submitted — locked' });
     const b = req.body || {};
+    // Found missing: the self-rating field was fully wired up server-side
+    // (this column, GET already returning cycle.rating_scale for it) but
+    // had no UI control on the Self-Appraisal page at all — added here,
+    // reused directly from Mid-Year Review's validation for consistency.
+    const rv = validateRating(b.overall_self_rating, c.rating_scale);
+    if (!rv.ok) return res.status(422).json({ error: rv.reason });
     await db.query(
       `UPDATE pms.self_appraisals SET status='in_progress',
          entries=COALESCE($2,entries), overall_self_rating=COALESCE($3,overall_self_rating),
          went_well=COALESCE($4,went_well), could_improve=COALESCE($5,could_improve), updated_at=now()
        WHERE id=$1`,
-      [a.id, b.entries ? JSON.stringify(b.entries) : null, b.overall_self_rating ?? null, b.went_well ?? null, b.could_improve ?? null]);
+      [a.id, b.entries ? JSON.stringify(b.entries) : null, rv.value, b.went_well ?? null, b.could_improve ?? null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

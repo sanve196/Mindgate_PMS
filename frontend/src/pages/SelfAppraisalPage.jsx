@@ -6,6 +6,11 @@ export default function SelfAppraisalPage() {
   const [data, setData] = useState(null);
   const [entries, setEntries] = useState({});
   const [f, setF] = useState({ went_well: '', could_improve: '' });
+  // Found missing live, with a screenshot: the overall self-rating
+  // (A+/A/B+/B/C/D) was already fully wired up server-side —
+  // pms.self_appraisals.overall_self_rating, GET already returning
+  // cycle.rating_scale for it — just no control on this page to set it.
+  const [overallRating, setOverallRating] = useState('');
   const [state, setState] = useState('idle');
   const [err, setErr] = useState(null);
   const timer = useRef(null);
@@ -13,7 +18,11 @@ export default function SelfAppraisalPage() {
   useEffect(() => {
     api('/pms/my/self-appraisal').then(r => {
       setData(r);
-      if (r.appraisal) { setEntries(r.appraisal.entries || {}); setF({ went_well: r.appraisal.went_well || '', could_improve: r.appraisal.could_improve || '' }); }
+      if (r.appraisal) {
+        setEntries(r.appraisal.entries || {});
+        setF({ went_well: r.appraisal.went_well || '', could_improve: r.appraisal.could_improve || '' });
+        setOverallRating(r.appraisal.overall_self_rating ?? '');
+      }
     }).catch(e => setErr(e.message));
   }, []);
 
@@ -32,6 +41,7 @@ export default function SelfAppraisalPage() {
     setEntries(next); queue({ entries: next });
   };
   const setField = (k) => (e) => { const next = { ...f, [k]: e.target.value }; setF(next); queue({ [k]: e.target.value }); };
+  const pickRating = (value) => { setOverallRating(value); persist({ overall_self_rating: value }); };
 
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
@@ -50,6 +60,16 @@ export default function SelfAppraisalPage() {
         {badge && <span className={`text-[11px] font-medium ${badge[1]}`}>{badge[0]}</span>}
       </div>
       {err && <p className="text-xs text-rose-600">{err}</p>}
+      <div className="card p-3 space-y-1.5">
+        <label className="lbl mb-0">Self-rating</label>
+        <div className="flex flex-wrap gap-1.5">
+          {(data.cycle.rating_scale || []).map(s => (
+            <button key={s.value} type="button" disabled={!open}
+              className={`chip ${Number(overallRating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
+              onClick={() => pickRating(s.value)}>{s.label}</button>
+          ))}
+        </div>
+      </div>
       {!data.kras.length && <div className="card p-4 text-sm text-amber-700 bg-amber-50 border-amber-200">No approved KRAs found — complete KRA setting first.</div>}
       {data.kras.map(k => (
         <div key={k.id} className="card p-3 space-y-2">
