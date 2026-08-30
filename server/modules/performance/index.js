@@ -1049,6 +1049,20 @@ router.get('/team/evaluations', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/team/evaluations/:employeeId/kras', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const emp = (await db.query(`SELECT id, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your report' });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ kras: [] });
+    const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.params.employeeId])).rows[0];
+    const kras = sheet ? (await db.query(`SELECT id, title, weight FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows : [];
+    res.json({ kras });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.put('/team/evaluations/:employeeId', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
@@ -1066,6 +1080,25 @@ router.put('/team/evaluations/:employeeId', async (req, res) => {
     if (c.cycle_type === 'annual' && b.overall_rating !== undefined) {
       return res.status(409).json({ error: 'On an annual cycle, overall_rating is computed from the 7 organisational parameters — use PUT /pms/team/parameter-scores/:employeeId instead' });
     }
+    // Requested: a rating (+ comment) per KRA for the manager too, mirroring
+    // Self-Appraisal's per-KRA rating — with overall_rating auto-computed as
+    // the weighted average, same computeWeightedRating() reuse as there.
+    // Scoped to non-annual cycles only (annual's overall_rating is already
+    // exclusively governed by the 7-parameter engine above; per-KRA entries
+    // can still be saved there as supplementary detail, they just don't
+    // drive overall_rating on that cycle type).
+    let overallRating = null; // null = leave untouched (COALESCE keeps the existing value)
+    if (c.cycle_type !== 'annual') {
+      if (b.entries) {
+        const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, emp.id])).rows[0];
+        const kras = sheet ? (await db.query(`SELECT id, weight AS weight_pct FROM pms.kras WHERE sheet_id=$1`, [sheet.id])).rows : [];
+        const scores = new Map(kras.map((k) => [k.id, b.entries[k.id] ? b.entries[k.id].rating : null]));
+        const { rating } = computeWeightedRating(kras, scores);
+        if (rating != null) overallRating = rating;
+      } else if (b.overall_rating != null) {
+        overallRating = b.overall_rating;
+      }
+    }
     await db.query(
       `INSERT INTO pms.manager_evaluations (tenant_id, cycle_id, employee_id, manager_id, entries, overall_rating, strengths, improvement_areas, status)
        VALUES ($1,$2,$3,$4,COALESCE($5,'{}'::jsonb),$6,$7,$8,'pending')
@@ -1076,8 +1109,8 @@ router.put('/team/evaluations/:employeeId', async (req, res) => {
          improvement_areas=COALESCE($8,pms.manager_evaluations.improvement_areas),
          updated_at=now()`,
       [T(req), c.id, emp.id, req.user.id, b.entries ? JSON.stringify(b.entries) : null,
-       c.cycle_type === 'annual' ? null : (b.overall_rating ?? null), b.strengths ?? null, b.improvement_areas ?? null]);
-    res.json({ ok: true });
+       overallRating, b.strengths ?? null, b.improvement_areas ?? null]);
+    res.json({ ok: true, overall_rating: overallRating });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1239,6 +1272,29 @@ router.get('/hod/queue', async (req, res) => {
         WHERE e.tenant_id=$2 ${isAdmin ? '' : 'AND e.department = ANY($3)'} ORDER BY e.department, e.name`,
       isAdmin ? [c.id, T(req)] : [c.id, T(req), depts]);
     res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, departments: depts, queue: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Requested: the Delivery Head Review view should show ratings by BOTH
+// the employee (self) and the manager against EACH KRA, not just the two
+// flat overall numbers — so the DH can see exactly what's behind the
+// manager's rating before finalising their own.
+router.get('/hod/queue/:employeeId/kras', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_hod'))) return res.status(403).json({ error: "Requires 'pms_hod'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ kras: [] });
+    const isAdmin = await hasPermission(req.user, 'pms_admin');
+    if (!isAdmin) {
+      const emp = (await db.query(`SELECT department FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+      const depts = (await db.query(`SELECT department FROM core.department_heads WHERE tenant_id=$1 AND employee_id=$2`, [T(req), req.user.id])).rows.map((r) => r.department);
+      if (!emp || !depts.includes(emp.department)) return res.status(403).json({ error: 'Not your department' });
+    }
+    const sheet = (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.params.employeeId])).rows[0];
+    const kras = sheet ? (await db.query(`SELECT id, title, weight FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows : [];
+    const sa = (await db.query(`SELECT entries FROM pms.self_appraisals WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.params.employeeId])).rows[0];
+    const me = (await db.query(`SELECT entries FROM pms.manager_evaluations WHERE cycle_id=$1 AND employee_id=$2`, [c.id, req.params.employeeId])).rows[0];
+    res.json({ kras, self_entries: (sa && sa.entries) || {}, manager_entries: (me && me.entries) || {} });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

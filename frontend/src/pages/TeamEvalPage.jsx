@@ -2,6 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, ChevronDown, ChevronRight } from 'lucide-react';
 import { api, phaseLabel, phaseColor, DraftBadge } from '../utils/api';
 
+// Matches Self-Appraisal's convention: per-KRA picks in letter grades,
+// the one computed overall in descriptive wording — see that page for
+// the reasoning (nuanced rubric for detail, plain language for the
+// summary figure). Fixed local maps, not the cycle's own rating_scale
+// labels, for the same reason: this pairing should hold regardless of
+// which label set a given cycle happens to have stored.
+const KRA_GRADE_LABEL = { 5: 'A+', 4: 'A', 3: 'B+', 2: 'B', 1: 'C' };
+const OVERALL_DESCRIPTIVE_LABEL = { 5: 'Outstanding', 4: 'Exceeds', 3: 'Meets Expectations', 2: 'Developing', 1: 'Needs Improvement' };
+function nearestWholeValue(value, scale) {
+  if (value == null || !Array.isArray(scale) || !scale.length) return null;
+  let closest = scale[0].value;
+  for (const s of scale) { if (Math.abs(s.value - value) < Math.abs(closest - value)) closest = s.value; }
+  return closest;
+}
+
 export default function TeamEvalPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -75,14 +90,8 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
       {cycleType === 'annual' ? (
         <ParameterScoring employeeId={t.employee_id} editable={editable} initialRating={t.overall_rating} />
       ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="lbl mb-0">Overall rating *</label>
-          <select className="inp w-auto" value={f.overall_rating} disabled={!editable}
-            onChange={(e) => { setF(s => ({ ...s, overall_rating: e.target.value })); persist({ overall_rating: e.target.value === '' ? null : Number(e.target.value) }); }}>
-            <option value="">—</option>
-            {(scale || []).map(s => <option key={s.value} value={s.value}>{s.value} · {s.label}</option>)}
-          </select>
-        </div>
+        <PerKraRating employeeId={t.employee_id} scale={scale} editable={editable} overallRating={f.overall_rating}
+          selfEntries={t.self_entries || {}} onOverallChange={(v) => setF(s => ({ ...s, overall_rating: v }))} />
       )}
       <div className="flex flex-wrap items-center gap-2">
         {editable && (
@@ -115,6 +124,89 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
           catch (e) { setErr(e.message); }
         }}><Send size={13} className="inline mr-1" />Submit evaluation</button>
       )}
+    </div>
+  );
+}
+
+// Requested: a rating scale per KRA for the manager too (mirroring
+// Self-Appraisal's per-KRA rating), with a comment per KRA, and the
+// overall computed server-side as the weighted average — see
+// PUT /team/evaluations/:employeeId. Employee's own self-rating per KRA
+// is shown alongside (read-only) for direct comparison while rating.
+function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries, onOverallChange }) {
+  const [kras, setKras] = useState(null);
+  const [entries, setEntries] = useState({});
+  const [err, setErr] = useState(null);
+  const [saveState, setSaveState] = useState('idle');
+  const timer = useRef(null);
+
+  useEffect(() => {
+    api(`/pms/team/evaluations/${employeeId}/kras`).then(r => setKras(r.kras)).catch(e => setErr(e.message));
+  }, [employeeId]);
+
+  const persistEntries = async (next) => {
+    setSaveState('saving');
+    try {
+      const r = await api(`/pms/team/evaluations/${employeeId}`, { method: 'PUT', body: JSON.stringify({ entries: next }) });
+      setSaveState('saved');
+      if (r.overall_rating != null) onOverallChange(r.overall_rating);
+    } catch (e) { setSaveState('error'); setErr(e.message); }
+  };
+  const setRating = (kraId, value) => {
+    const next = { ...entries, [kraId]: { ...(entries[kraId] || {}), rating: value } };
+    setEntries(next); persistEntries(next);
+  };
+  const setComment = (kraId) => (e) => {
+    const value = e.target.value;
+    const next = { ...entries, [kraId]: { ...(entries[kraId] || {}), comment: value } };
+    setEntries(next); setSaveState('dirty');
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => persistEntries(next), 1200);
+  };
+
+  if (err) return <p className="text-xs text-rose-600">{err}</p>;
+  if (!kras) return <p className="text-xs text-navy-400">Loading KRAs…</p>;
+  if (!kras.length) return <p className="text-xs text-navy-400">No KRAs found for this employee this cycle.</p>;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="lbl mb-0">Rate each KRA</p>
+        {saveState === 'saving' && <span className="text-[11px] text-amber-600">Saving…</span>}
+        {saveState === 'saved' && <span className="text-[11px] text-emerald-600">Saved ✓</span>}
+      </div>
+      {kras.map(k => {
+        const selfRating = selfEntries[k.id] && selfEntries[k.id].self_rating;
+        const myRating = (entries[k.id] || {}).rating;
+        return (
+          <div key={k.id} className="bg-navy-50 rounded-lg p-3 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold flex-1">{k.title}</p>
+              <span className="text-[11px] text-navy-400">{k.weight}%</span>
+            </div>
+            {selfRating != null && (
+              <p className="text-[11px] text-navy-500">Employee's self-rating: <b>{KRA_GRADE_LABEL[selfRating] || selfRating}</b></p>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              {(scale || []).map(s => (
+                <button key={s.value} type="button" disabled={!editable}
+                  className={`chip ${Number(myRating) === s.value ? 'bg-navy-700 text-white' : 'bg-white text-navy-600 border border-navy-100'}`}
+                  onClick={() => setRating(k.id, s.value)}>{KRA_GRADE_LABEL[s.value] || s.label}</button>
+              ))}
+            </div>
+            <textarea className="inp !bg-white" rows={2} placeholder="Comment on this KRA (optional)"
+              value={(entries[k.id] || {}).comment ?? ''} onChange={setComment(k.id)} disabled={!editable} />
+          </div>
+        );
+      })}
+      <p className="text-sm">
+        <span className="font-semibold">Overall rating: </span>
+        {overallRating != null ? (
+          <span className="text-emerald-700 font-bold">{OVERALL_DESCRIPTIVE_LABEL[nearestWholeValue(Number(overallRating), scale)] || overallRating} ({Number(overallRating).toFixed(1)})</span>
+        ) : (
+          <span className="text-navy-400">— rate each KRA above to see the weighted average</span>
+        )}
+      </p>
     </div>
   );
 }
