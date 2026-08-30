@@ -2,16 +2,29 @@ import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Trash2, Download } from 'lucide-react';
 import { api, phaseLabel, phaseColor, API_BASE } from '../utils/api';
 
+// Requested: per-KRA rating uses letter grades (A+ down to C), but the
+// computed OVERALL average is shown with the older descriptive wording
+// (Outstanding down to Needs Improvement) — two different label sets for
+// the same underlying 1-5 values, by deliberate choice (a nuanced,
+// familiar rubric for detailed per-KRA feedback; plainer, more universally
+// understood language for the one summary figure). Kept as fixed local
+// maps rather than trusting cycle.rating_scale's own .label field, since
+// that field can differ per cycle (some still carry the old descriptive
+// default, some the newer letter-grade one) and this pairing needs to
+// hold regardless of which one a given cycle happens to have stored.
+const KRA_GRADE_LABEL = { 5: 'A+', 4: 'A', 3: 'B+', 2: 'B', 1: 'C' };
+const OVERALL_DESCRIPTIVE_LABEL = { 5: 'Outstanding', 4: 'Exceeds', 3: 'Meets Expectations', 2: 'Developing', 1: 'Needs Improvement' };
+
 // The overall rating is a weighted average of the per-KRA picks below, so
-// it's usually fractional (e.g. 3.7) — this finds the CLOSEST scale entry
+// it's usually fractional (e.g. 3.7) — this finds the CLOSEST whole value
 // to label it with, rather than requiring an exact match (unlike a
 // directly-picked rating, which is always exactly one of the scale's
 // values already).
-function ratingLabel(value, scale) {
+function nearestWholeValue(value, scale) {
   if (value == null || !Array.isArray(scale) || !scale.length) return null;
-  let closest = scale[0];
-  for (const s of scale) { if (Math.abs(s.value - value) < Math.abs(closest.value - value)) closest = s; }
-  return closest.label;
+  let closest = scale[0].value;
+  for (const s of scale) { if (Math.abs(s.value - value) < Math.abs(closest - value)) closest = s.value; }
+  return closest;
 }
 
 export default function SelfAppraisalPage() {
@@ -79,7 +92,7 @@ export default function SelfAppraisalPage() {
         <label className="lbl mb-0">Overall self-rating (weighted average of the KRAs below)</label>
         {overallRating != null ? (
           <div className="flex items-baseline gap-2">
-            <span className="text-lg font-bold text-navy-700">{ratingLabel(overallRating, data.cycle.rating_scale)}</span>
+            <span className="text-lg font-bold text-navy-700">{OVERALL_DESCRIPTIVE_LABEL[nearestWholeValue(overallRating, data.cycle.rating_scale)] || overallRating}</span>
             <span className="text-xs text-navy-400">({Number(overallRating).toFixed(1)})</span>
           </div>
         ) : (
@@ -97,7 +110,7 @@ export default function SelfAppraisalPage() {
             {(data.cycle.rating_scale || []).map(s => (
               <button key={s.value} type="button" disabled={!open}
                 className={`chip ${Number((entries[k.id] || {}).self_rating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
-                onClick={() => setKraRating(k.id, s.value)}>{s.label}</button>
+                onClick={() => setKraRating(k.id, s.value)}>{KRA_GRADE_LABEL[s.value] || s.label}</button>
             ))}
           </div>
           <textarea className="inp" rows={3} placeholder="What you achieved against this KRA — be specific, name evidence"
