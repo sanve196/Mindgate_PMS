@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText, UserCog } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText, UserCog, History, LayoutDashboard } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -14,6 +14,9 @@ import EngagementPage from './pages/EngagementPage';
 import PeopleHubPage from './pages/PeopleHubPage';
 import DirectoryPage from './pages/DirectoryPage';
 import DepartmentHeadsPage from './pages/DepartmentHeadsPage';
+import CompletionReportPage from './pages/CompletionReportPage';
+import HistoryPage from './pages/HistoryPage';
+import TeamOverviewPage from './pages/TeamOverviewPage';
 import PIPPage from './pages/PIPPage';
 import WatchlistPage from './pages/WatchlistPage';
 import NotificationBell from './pages/NotificationBell';
@@ -34,9 +37,11 @@ const NAV = [
     { to: '/my/midyear', label: 'Mid-Year Review', icon: Clock },
     { to: '/my/growth', label: 'My Growth', icon: TrendingUp },
     { to: '/my/annual-review', label: 'Annual Review', icon: Award },
+    { to: '/my/history', label: 'Past Cycles', icon: History },
     { to: '/my/pulse-check', label: 'Pulse Check', icon: Heart },
   ]},
   { group: 'Team', items: [
+    { to: '/team/overview', label: 'Team Overview', icon: LayoutDashboard },
     { to: '/team/kra-sheets', label: 'Team KRA Sheets', icon: ClipboardList },
     { to: '/team/eval', label: 'Team Evaluation', icon: Users },
     { to: '/team/connects', label: 'Quarterly Connects', icon: MessageCircle },
@@ -46,6 +51,7 @@ const NAV = [
   { group: 'HR Admin', items: [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
+    { to: '/admin/completion-report', label: 'PMS Completion Report', icon: FileText, roles: ['admin', 'hr'] },
     { to: '/admin/directory', label: 'Employees', icon: Upload, roles: ['admin', 'hr'] },
     { to: '/admin/department-heads', label: 'Department Heads', icon: UserCog, roles: ['admin', 'hr'] },
     { to: '/admin/kra-overview', label: 'KRA Overview', icon: ClipboardList },
@@ -124,7 +130,9 @@ export default function App() {
             <Route path="/my/midyear" element={<MidYearReviewPage />} />
             <Route path="/my/growth" element={<MyGrowthPage />} />
             <Route path="/my/annual-review" element={<AnnualReviewPage />} />
+            <Route path="/my/history" element={<HistoryPage />} />
             <Route path="/my/pulse-check" element={<PulseCheckPage />} />
+            <Route path="/team/overview" element={<TeamOverviewPage />} />
             <Route path="/team/kra-sheets" element={<TeamKraSheetsPage />} />
             <Route path="/team/eval" element={<TeamEvalPage user={user} />} />
             <Route path="/team/connects" element={<ConnectsPage />} />
@@ -133,6 +141,7 @@ export default function App() {
             <Route path="/admin/cycles" element={<CycleAdminPage />} />
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<RequireRole user={user} roles={['admin', 'hr']}><DirectoryPage /></RequireRole>} />
+            <Route path="/admin/completion-report" element={<RequireRole user={user} roles={['admin', 'hr']}><CompletionReportPage /></RequireRole>} />
             <Route path="/admin/department-heads" element={<RequireRole user={user} roles={['admin', 'hr']}><DepartmentHeadsPage /></RequireRole>} />
             <Route path="/admin/kra-overview" element={<KraOrgOverviewPage />} />
             <Route path="/admin/closure-letters" element={<ClosureLettersPage />} />

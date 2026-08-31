@@ -2093,4 +2093,140 @@ router.get('/closure-letters/:employeeId/:cycleId/download', async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---------------- Reporting & repair utilities -------------------------------
+// The four items confirmed missing in a direct BRD/reference-menu review and
+// then requested to be built: a completion report, a personal rating
+// history, a consolidated team view, and an idempotent HOD-queue repair
+// action. All read-only except the last, which only ever creates rows that
+// SHOULD already exist (INSERT ... DO NOTHING) — never overwrites anything.
+
+// "PMS Completion Report" — who has and hasn't completed their PMS this
+// cycle, across every stage an employee is personally responsible for
+// (KRA, Dev Plan, Self-Appraisal, Manager Evaluation). HOD review is
+// intentionally excluded from "employee complete" — it isn't the
+// employee's own action to finish.
+router.get('/reports/completion', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, rows: [] });
+    const r = await db.query(
+      `SELECT e.id AS employee_id, e.name, e.department,
+              COALESCE(ks.status, 'not_started') AS kra_status,
+              COALESCE(dp.status, 'not_started') AS devplan_status,
+              COALESCE(sa.status, 'not_started') AS self_appraisal_status,
+              COALESCE(me.status, 'pending') AS manager_eval_status,
+              COALESCE(he.status, 'pending') AS hod_status
+         FROM core.employees e
+         LEFT JOIN pms.kra_sheets ks ON ks.cycle_id=$1 AND ks.employee_id=e.id
+         LEFT JOIN pms.development_plans dp ON dp.cycle_id=$1 AND dp.employee_id=e.id
+         LEFT JOIN pms.self_appraisals sa ON sa.cycle_id=$1 AND sa.employee_id=e.id
+         LEFT JOIN pms.manager_evaluations me ON me.cycle_id=$1 AND me.employee_id=e.id
+         LEFT JOIN pms.hod_evaluations he ON he.cycle_id=$1 AND he.employee_id=e.id
+        WHERE e.tenant_id=$2 AND e.status='active' ORDER BY e.department, e.name`,
+      [c.id, T(req)]);
+    const rows = r.rows.map((row) => ({
+      ...row,
+      complete: ['approved'].includes(row.kra_status) &&
+        ['approved'].includes(row.devplan_status) &&
+        row.self_appraisal_status === 'submitted' &&
+        row.manager_eval_status === 'submitted',
+    }));
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// "See past years" — an employee's own rating history across published
+// annual cycles (the same table Super 50 reads), plus a manager/admin
+// view of a specific report's.
+router.get('/my/history', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT h.cycle_id, c.name AS cycle_name, c.fiscal_year, h.final_rating, h.rating_label, h.published_at
+         FROM pms.employee_performance_history h JOIN pms.cycles c ON c.id=h.cycle_id
+        WHERE h.tenant_id=$1 AND h.employee_id=$2 ORDER BY h.published_at DESC`,
+      [T(req), req.user.id]);
+    res.json({ history: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/team/history/:employeeId', async (req, res) => {
+  try {
+    const emp = (await db.query(`SELECT id, name, manager_id FROM core.employees WHERE id=$1 AND tenant_id=$2`, [req.params.employeeId, T(req)])).rows[0];
+    if (!emp) return res.status(404).json({ error: 'employee not found' });
+    if (emp.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin')) && !(await hasPermission(req.user, 'pms_hod'))) {
+      return res.status(403).json({ error: 'Not your report' });
+    }
+    const r = await db.query(
+      `SELECT h.cycle_id, c.name AS cycle_name, c.fiscal_year, h.final_rating, h.rating_label, h.published_at
+         FROM pms.employee_performance_history h JOIN pms.cycles c ON c.id=h.cycle_id
+        WHERE h.tenant_id=$1 AND h.employee_id=$2 ORDER BY h.published_at DESC`,
+      [T(req), req.params.employeeId]);
+    res.json({ employee: { id: emp.id, name: emp.name }, history: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// "Team overview" — all of a manager's reports' progress in one view,
+// across modules that today each live on their own separate screen (Team
+// KRA Sheets, My Growth's team section, Team Evaluation, Connects).
+router.get('/team/overview', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_team_eval'))) return res.status(403).json({ error: "Requires 'pms_team_eval'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.json({ cycle: null, rows: [] });
+    const r = await db.query(
+      `SELECT e.id AS employee_id, e.name, e.department,
+              COALESCE(ks.status, 'not_started') AS kra_status,
+              COALESCE(dp.status, 'not_started') AS devplan_status,
+              (cp.target_role IS NOT NULL) AS has_career_path,
+              COALESCE(sa.status, 'not_started') AS self_appraisal_status,
+              COALESCE(me.status, 'pending') AS manager_eval_status,
+              (SELECT COUNT(*)::int FROM pms.connects cn WHERE cn.tenant_id=$2 AND cn.employee_id=e.id AND cn.held_at >= COALESCE($1::date, cn.held_at)) AS connects_this_cycle
+         FROM core.employees e
+         LEFT JOIN pms.kra_sheets ks ON ks.cycle_id=$3 AND ks.employee_id=e.id
+         LEFT JOIN pms.development_plans dp ON dp.cycle_id=$3 AND dp.employee_id=e.id
+         LEFT JOIN people.career_paths cp ON cp.tenant_id=e.tenant_id AND cp.employee_id=e.id
+         LEFT JOIN pms.self_appraisals sa ON sa.cycle_id=$3 AND sa.employee_id=e.id
+         LEFT JOIN pms.manager_evaluations me ON me.cycle_id=$3 AND me.employee_id=e.id
+        WHERE e.tenant_id=$2 AND e.manager_id=$4 AND e.status='active' ORDER BY e.name`,
+      [c.opens_at || null, T(req), c.id, req.user.id]);
+    res.json({ cycle: { id: c.id, name: c.name, phase: c.phase }, rows: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// "Re-seed HOD evaluations" — idempotent. GET /hod/queue already shows a
+// submitted manager evaluation even with no hod_evaluations row yet (LEFT
+// JOIN), but nothing pre-creates that row — this proactively ensures one
+// exists (status 'pending') for every employee whose manager evaluation is
+// submitted, so the queue is fully seeded rather than relying on lazy
+// creation the first time a Delivery Head opens each one. ON CONFLICT DO
+// NOTHING — never overwrites an existing decision, safe to re-run anytime.
+router.post('/hod/re-seed', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = await activeCycle(T(req));
+    if (!c) return res.status(409).json({ error: 'No active cycle' });
+    const submitted = (await db.query(
+      `SELECT me.employee_id, e.department FROM pms.manager_evaluations me JOIN core.employees e ON e.id=me.employee_id
+        WHERE me.tenant_id=$1 AND me.cycle_id=$2 AND me.status='submitted'`, [T(req), c.id])).rows;
+    let created = 0;
+    let skippedNoHead = 0;
+    for (const row of submitted) {
+      const head = (await db.query(`SELECT employee_id FROM core.department_heads WHERE tenant_id=$1 AND department=$2`, [T(req), row.department])).rows[0];
+      // hod_evaluations.hod_id is NOT NULL — a department with no head
+      // assigned yet has nowhere to route the row to, so it's skipped
+      // rather than inserted with a placeholder. Assign the department
+      // head first (HR Admin -> Department Heads), then re-run.
+      if (!head) { skippedNoHead++; continue; }
+      const result = await db.query(
+        `INSERT INTO pms.hod_evaluations (tenant_id, cycle_id, employee_id, hod_id, status) VALUES ($1,$2,$3,$4,'pending')
+         ON CONFLICT (cycle_id, employee_id) DO NOTHING RETURNING id`,
+        [T(req), c.id, row.employee_id, head.employee_id]);
+      if (result.rows.length) created++;
+    }
+    audit(req, 'HOD_QUEUE_RESEEDED', c.id, null, { checked: submitted.length, created, skippedNoHead });
+    res.json({ ok: true, checked: submitted.length, created, skipped_no_head: skippedNoHead });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = { router, checkAndSendConnectReminders };
