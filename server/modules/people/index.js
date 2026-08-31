@@ -296,6 +296,87 @@ router.delete('/career/matrix/:roleBand/:level', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Distinct designations already on file for real employees — feeds the
+// From Role / To Role dropdowns ("sourced from hr.employees — exact match
+// guaranteed") rather than letting HR type a role name that doesn't
+// actually match anyone.
+router.get('/designations', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT DISTINCT designation FROM core.employees WHERE tenant_id=$1 AND designation IS NOT NULL AND designation <> '' ORDER BY designation`,
+      [T(req)]);
+    res.json({ designations: r.rows.map((row) => row.designation) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Career Pathing Matrix (CR-11, phase 1 of 2 — richer transition rules on
+// top of the simpler career_matrix band/level list above). Requested with
+// reference screenshots of a "New transition" form; built to the exact
+// fields shown, with min/typical time-in-role stored and displayed but
+// NOT enforced (see migration 022's comment for why).
+router.get('/career/transitions', async (req, res) => {
+  try {
+    if (!(await adminOnly(req, res))) return;
+    const includeInactive = req.query.active === 'false' || req.query.show_inactive === 'true';
+    const q = (req.query.q || '').trim();
+    const params = [T(req)];
+    let where = `tenant_id=$1 ${includeInactive ? '' : 'AND active=true'}`;
+    if (q) {
+      params.push(`%${q}%`);
+      where += ` AND (from_role ILIKE $${params.length} OR to_role ILIKE $${params.length} OR from_level ILIKE $${params.length} OR to_level ILIKE $${params.length})`;
+    }
+    const r = await db.query(`SELECT * FROM people.career_transitions WHERE ${where} ORDER BY from_role, from_level NULLS FIRST, to_role`, params);
+    res.json({ transitions: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/career/transitions', async (req, res) => {
+  try {
+    if (!(await adminOnly(req, res))) return;
+    const b = req.body || {};
+    if (!b.from_role || !b.to_role) return res.status(400).json({ error: 'from_role and to_role are required' });
+    const competencies = Array.isArray(b.required_competencies) ? b.required_competencies
+      : (typeof b.required_competencies === 'string' ? b.required_competencies.split('\n').map((s) => s.trim()).filter(Boolean) : []);
+    const r = await db.query(
+      `INSERT INTO people.career_transitions
+         (tenant_id, from_role, from_level, to_role, to_level, expected_level_change, min_time_months, typical_time_months, required_competencies, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [T(req), b.from_role, b.from_level || null, b.to_role, b.to_level || null,
+       b.expected_level_change ?? null, b.min_time_months ?? null, b.typical_time_months ?? null, competencies, b.notes || null]);
+    res.json({ ok: true, transition: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/career/transitions/:id', async (req, res) => {
+  try {
+    if (!(await adminOnly(req, res))) return;
+    const b = req.body || {};
+    const competencies = Array.isArray(b.required_competencies) ? b.required_competencies
+      : (typeof b.required_competencies === 'string' ? b.required_competencies.split('\n').map((s) => s.trim()).filter(Boolean) : undefined);
+    const r = await db.query(
+      `UPDATE people.career_transitions SET
+         from_role=COALESCE($3,from_role), from_level=$4, to_role=COALESCE($5,to_role), to_level=$6,
+         expected_level_change=$7, min_time_months=$8, typical_time_months=$9,
+         required_competencies=COALESCE($10,required_competencies), notes=$11,
+         active=COALESCE($12,active), updated_at=now()
+       WHERE id=$1 AND tenant_id=$2 RETURNING *`,
+      [req.params.id, T(req), b.from_role || null, b.from_level ?? null, b.to_role || null, b.to_level ?? null,
+       b.expected_level_change ?? null, b.min_time_months ?? null, b.typical_time_months ?? null,
+       competencies || null, b.notes ?? null, b.active ?? null]);
+    if (!r.rows.length) return res.status(404).json({ error: 'transition not found' });
+    res.json({ ok: true, transition: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/career/transitions/:id', async (req, res) => {
+  try {
+    if (!(await adminOnly(req, res))) return;
+    const r = await db.query(`DELETE FROM people.career_transitions WHERE id=$1 AND tenant_id=$2 RETURNING id`, [req.params.id, T(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'transition not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Employee-facing career path (BR-3.1/3.2) — FOUND MISSING alongside
 // Development Plan, 28-Aug-2026: only the HR-configured matrix above and
 // the raw people.career_paths table (migration 004) existed; no route let
