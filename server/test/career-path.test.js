@@ -154,3 +154,36 @@ test('career path: expected timeline is saved and returned alongside target role
   const row = teamView.body.team.find((x) => x.employee_id === empId);
   assert.equal(row.target_timeline, '12-18 months', 'manager view also surfaces the timeline');
 });
+
+// The one piece missing from career/matrix's existing GET/PUT, built
+// per a follow-up scoping conversation: HR previously had no way to
+// remove a mistaken or outdated role band/level entry.
+test('career framework: HR can delete a role band/level entry; requires admin; 404s on an entry that does not exist', { skip }, async () => {
+  const t = (await db.query(`SELECT tenant_id FROM core.employees WHERE id=$1`, [empId])).rows[0].tenant_id;
+  const admin = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'Career Admin','career-admin@x.com','active') RETURNING id`, [t])).rows[0];
+  const bcrypt = require('bcryptjs');
+  await db.query(`INSERT INTO core.local_credentials (tenant_id, email, password_hash) VALUES ($1,'career-admin@x.com',$2)`, [t, await bcrypt.hash('pass', 10)]);
+  await db.query(`INSERT INTO core.user_roles (tenant_id, email, role) VALUES ($1,'career-admin@x.com','admin')`, [t]);
+
+  const adminAuth = await login('career-admin@x.com');
+  const put = await api('/people/career/matrix', adminAuth.token, {
+    method: 'PUT', body: JSON.stringify({ role_band: 'L9-Test', level: 'Principal', expectations: 'Sets technical direction org-wide' }),
+  });
+  assert.equal(put.status, 200);
+
+  const listed = await api('/people/career/matrix', adminAuth.token);
+  assert.ok(listed.body.matrix.some((r) => r.role_band === 'L9-Test' && r.level === 'Principal'));
+
+  const empAuth = await login('cp-emp@x.com');
+  const blocked = await api('/people/career/matrix/L9-Test/Principal', empAuth.token, { method: 'DELETE' });
+  assert.equal(blocked.status, 403, 'delete requires admin, same as add/edit');
+
+  const del = await api('/people/career/matrix/L9-Test/Principal', adminAuth.token, { method: 'DELETE' });
+  assert.equal(del.status, 200);
+
+  const afterDelete = await api('/people/career/matrix', adminAuth.token);
+  assert.ok(!afterDelete.body.matrix.some((r) => r.role_band === 'L9-Test'), 'actually removed, not just marked');
+
+  const missing = await api('/people/career/matrix/L9-Test/Principal', adminAuth.token, { method: 'DELETE' });
+  assert.equal(missing.status, 404, 'deleting an entry that no longer exists is a clean 404, not a silent success');
+});

@@ -281,6 +281,21 @@ router.put('/career/matrix', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Only piece missing from the two routes above (per a scoping conversation):
+// GET/PUT already let HR read and add/edit entries, but there was no way to
+// remove a mistaken or outdated one. Self-contained addition — doesn't touch
+// either route above or anything that reads this table elsewhere.
+router.delete('/career/matrix/:roleBand/:level', async (req, res) => {
+  try {
+    if (!(await adminOnly(req, res))) return;
+    const r = await db.query(
+      `DELETE FROM people.career_matrix WHERE tenant_id=$1 AND role_band=$2 AND level=$3 RETURNING role_band`,
+      [T(req), decodeURIComponent(req.params.roleBand), decodeURIComponent(req.params.level)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'entry not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Employee-facing career path (BR-3.1/3.2) — FOUND MISSING alongside
 // Development Plan, 28-Aug-2026: only the HR-configured matrix above and
 // the raw people.career_paths table (migration 004) existed; no route let
