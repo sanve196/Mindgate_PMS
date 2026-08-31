@@ -173,15 +173,15 @@ function CareerPathCard() {
       </div>
       <div>
         <label className="lbl">Target role</label>
-        {data.eligible_role_bands.length ? (
+        {data.eligible_target_roles.length ? (
           <select className="inp" value={form.target_role} disabled={!editable} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))}>
             <option value="">—</option>
-            {data.eligible_role_bands.map(b => <option key={b} value={b}>{b}</option>)}
+            {data.eligible_target_roles.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         ) : (
           <input className="inp" value={form.target_role} disabled={!editable} onChange={e => setForm(f => ({ ...f, target_role: e.target.value }))} placeholder="e.g. Staff Engineer" />
         )}
-        {data.eligible_role_bands.length > 0 && <p className="text-[11px] text-navy-400 mt-1">Limited to your organisation's configured role bands (guardrails).</p>}
+        {data.eligible_target_roles.length > 0 && <p className="text-[11px] text-navy-400 mt-1">Limited to transitions HR has configured from your current role in the Career Pathing Matrix.</p>}
       </div>
       <div>
         <label className="lbl">Expected timeline</label>

@@ -261,40 +261,13 @@ router.get('/queries/:id/messages', async (req, res) => {
 });
 
 // ---- Career -----------------------------------------------------------------
-router.get('/career/matrix', async (req, res) => {
-  try {
-    const r = await db.query(`SELECT role_band, level, expectations FROM people.career_matrix WHERE tenant_id=$1 ORDER BY role_band, level`, [T(req)]);
-    res.json({ matrix: r.rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.put('/career/matrix', async (req, res) => {
-  try {
-    if (!(await adminOnly(req, res))) return;
-    const { role_band, level, expectations } = req.body || {};
-    if (!role_band || !level) return res.status(400).json({ error: 'role_band and level required' });
-    await db.query(
-      `INSERT INTO people.career_matrix (tenant_id, role_band, level, expectations) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (tenant_id, role_band, level) DO UPDATE SET expectations=EXCLUDED.expectations`,
-      [T(req), role_band, level, expectations || null]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Only piece missing from the two routes above (per a scoping conversation):
-// GET/PUT already let HR read and add/edit entries, but there was no way to
-// remove a mistaken or outdated one. Self-contained addition — doesn't touch
-// either route above or anything that reads this table elsewhere.
-router.delete('/career/matrix/:roleBand/:level', async (req, res) => {
-  try {
-    if (!(await adminOnly(req, res))) return;
-    const r = await db.query(
-      `DELETE FROM people.career_matrix WHERE tenant_id=$1 AND role_band=$2 AND level=$3 RETURNING role_band`,
-      [T(req), decodeURIComponent(req.params.roleBand), decodeURIComponent(req.params.level)]);
-    if (!r.rows.length) return res.status(404).json({ error: 'entry not found' });
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+// Career Framework (a flat role_band/level allow-list, people.career_matrix)
+// was removed here in favour of the Career Pathing Matrix
+// (people.career_transitions) — the guardrail check below now validates
+// against specific from-role -> to-role transitions instead of a flat
+// list. The career_matrix TABLE itself was deliberately left in place
+// (not dropped) rather than adding a destructive migration; it's simply
+// unused now, with nothing reading or writing to it.
 
 // Distinct designations already on file for real employees — feeds the
 // From Role / To Role dropdowns ("sourced from hr.employees — exact match
@@ -384,12 +357,33 @@ router.delete('/career/transitions/:id', async (req, res) => {
 // are enforced softly: if HR has configured any career_matrix role_bands,
 // a target_role must match one of them; if the matrix is still empty,
 // nothing is blocked (an unconfigured guardrail can't guard anything yet).
+// Looks up valid transitions FROM the employee's own current role — used
+// by both GET (to list eligible target roles) and PUT (to validate one).
+// "Current role" is core.employees.designation, the same field the
+// transition matrix's From/To Role dropdowns are sourced from. If the
+// employee's designation has no active transitions defined FROM it at
+// all, the guardrail is treated as unconfigured for them and nothing is
+// blocked — same permissive-when-unconfigured philosophy the old
+// Career Framework check used, just evaluated per employee now instead
+// of against one flat org-wide list.
+async function eligibleTransitionsFor(tenantId, employeeId) {
+  const emp = (await db.query(`SELECT designation, role_band FROM core.employees WHERE id=$1 AND tenant_id=$2`, [employeeId, tenantId])).rows[0];
+  if (!emp || !emp.designation) return [];
+  const r = await db.query(
+    `SELECT * FROM people.career_transitions
+      WHERE tenant_id=$1 AND active=true AND from_role=$2
+        AND (from_level IS NULL OR from_level = $3)`,
+    [tenantId, emp.designation, emp.role_band || null]);
+  return r.rows;
+}
+
 router.get('/career/my-path', async (req, res) => {
   try {
     const p = (await db.query(`SELECT target_role, target_timeline, plan, updated_at FROM people.career_paths WHERE tenant_id=$1 AND employee_id=$2`, [T(req), req.user.id])).rows[0];
-    const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1 ORDER BY role_band`, [T(req)])).rows.map((r) => r.role_band);
+    const transitions = await eligibleTransitionsFor(T(req), req.user.id);
+    const eligibleTargetRoles = [...new Set(transitions.map((t) => t.to_role))].sort();
     const phase = await activeCyclePhase(T(req));
-    res.json({ path: p || null, eligible_role_bands: bands, cycle_phase: phase, editable: pm.phaseAllows(phase, 'career_edit') });
+    res.json({ path: p || null, eligible_target_roles: eligibleTargetRoles, cycle_phase: phase, editable: pm.phaseAllows(phase, 'career_edit') });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -401,9 +395,10 @@ router.put('/career/my-path', async (req, res) => {
     }
     const { target_role, target_timeline, plan } = req.body || {};
     if (!target_role || !String(target_role).trim()) return res.status(400).json({ error: 'target_role required' });
-    const bands = (await db.query(`SELECT DISTINCT role_band FROM people.career_matrix WHERE tenant_id=$1`, [T(req)])).rows.map((r) => r.role_band);
-    if (bands.length && !bands.includes(target_role)) {
-      return res.status(422).json({ error: `target_role must be one of the organisation's configured guardrails: ${bands.join(', ')}` });
+    const transitions = await eligibleTransitionsFor(T(req), req.user.id);
+    const eligibleTargetRoles = [...new Set(transitions.map((t) => t.to_role))];
+    if (eligibleTargetRoles.length && !eligibleTargetRoles.includes(target_role)) {
+      return res.status(422).json({ error: `target_role must be one of the transitions configured from your current role in the Career Pathing Matrix: ${eligibleTargetRoles.join(', ')}` });
     }
     await db.query(
       `INSERT INTO people.career_paths (tenant_id, employee_id, target_role, target_timeline, plan) VALUES ($1,$2,$3,$4,$5)

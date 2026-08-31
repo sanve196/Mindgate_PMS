@@ -4,6 +4,13 @@
 // employee set or view their own path. Real Postgres, real HTTP surface,
 // skips cleanly without DATABASE_URL, same convention as the other
 // integration suites.
+//
+// UPDATED: the flat role_band allow-list (Career Framework,
+// people.career_matrix) was removed in favour of the Career Pathing
+// Matrix (people.career_transitions) — the guardrail now validates a
+// specific from-role -> to-role transition, keyed off the employee's own
+// current designation, rather than checking target_role against one flat
+// org-wide list.
 const { test, after, before } = require('node:test');
 const assert = require('node:assert');
 
@@ -30,7 +37,8 @@ before(async () => {
   await require('../migrations/002-default-permission-bundles').ensureTenantSeeds(db, t.id);
 
   const mgr = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'CP Mgr','cp-mgr@x.com','active') RETURNING id`, [t.id])).rows[0];
-  const emp = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status, manager_id) VALUES ($1,'CP Emp','cp-emp@x.com','active',$2) RETURNING id`, [t.id, mgr.id])).rows[0];
+  // designation is what the new guardrail keys "current role" off of.
+  const emp = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status, manager_id, designation) VALUES ($1,'CP Emp','cp-emp@x.com','active',$2,'Software Engineer II') RETURNING id`, [t.id, mgr.id])).rows[0];
   empId = emp.id;
   await db.query(`INSERT INTO core.user_roles (tenant_id, email, role) VALUES ($1,'cp-mgr@x.com','manager')`, [t.id]);
   const hash = await bcrypt.hash('pass', 10);
@@ -68,11 +76,11 @@ async function api(path, token, opts = {}) {
   return { status: r.status, body: await r.json() };
 }
 
-test('career path: no guardrails configured yet — any target_role is accepted', { skip }, async () => {
+test('career path: no transitions configured yet — any target_role is accepted', { skip }, async () => {
   const { token } = await login('cp-emp@x.com');
   const initial = await api('/people/career/my-path', token);
   assert.equal(initial.body.path, null);
-  assert.deepEqual(initial.body.eligible_role_bands, []);
+  assert.deepEqual(initial.body.eligible_target_roles, []);
 
   const set = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'Staff Engineer', plan: 'Grow into a tech-lead role' }) });
   assert.equal(set.status, 200);
@@ -81,19 +89,33 @@ test('career path: no guardrails configured yet — any target_role is accepted'
   assert.equal(after1.body.path.target_role, 'Staff Engineer');
 });
 
-test('career path: once HR configures guardrails, an unlisted target_role is rejected', { skip }, async () => {
+test('career path: once HR configures a transition FROM the employee\'s own role, an unlisted target_role is rejected', { skip }, async () => {
   const empAuth = await login('cp-emp@x.com');
-  const mgrAuth = await login('cp-mgr@x.com'); // manager doesn't have people_admin; use direct db insert to seed the matrix like an admin would
+  // Seeded directly, as HR would via the Career Pathing Matrix screen —
+  // from_role must match the employee's own designation ('Software
+  // Engineer II') for this to actually apply to them.
   await db.query(
-    `INSERT INTO people.career_matrix (tenant_id, role_band, level, expectations) VALUES ($1,'L4','Senior','Owns a domain')`,
+    `INSERT INTO people.career_transitions (tenant_id, from_role, to_role, active) VALUES ($1,'Software Engineer II','Software Engineer III',true)`,
     [tenantId]);
 
-  const bad = await api('/people/career/my-path', empAuth.token, { method: 'PUT', body: JSON.stringify({ target_role: 'Not A Real Band' }) });
+  const bad = await api('/people/career/my-path', empAuth.token, { method: 'PUT', body: JSON.stringify({ target_role: 'Not A Real Role' }) });
   assert.equal(bad.status, 422);
-  assert.match(bad.body.error, /L4/);
+  assert.match(bad.body.error, /Software Engineer III/);
 
-  const good = await api('/people/career/my-path', empAuth.token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4' }) });
+  const good = await api('/people/career/my-path', empAuth.token, { method: 'PUT', body: JSON.stringify({ target_role: 'Software Engineer III' }) });
   assert.equal(good.status, 200);
+});
+
+test('career path: a transition configured FROM a different role does not apply — inactive transitions are also ignored', { skip }, async () => {
+  await db.query(
+    `INSERT INTO people.career_transitions (tenant_id, from_role, to_role, active) VALUES
+       ($1,'Some Other Role','Should Not Show Up',true),
+       ($1,'Software Engineer II','Inactive Path',false)`,
+    [tenantId]);
+
+  const { token } = await login('cp-emp@x.com');
+  const r = await api('/people/career/my-path', token);
+  assert.deepEqual(r.body.eligible_target_roles, ['Software Engineer III'], 'only the active transition from THIS employee\'s own role shows up');
 });
 
 test('career path: manager can see their reports\' paths', { skip }, async () => {
@@ -101,12 +123,12 @@ test('career path: manager can see their reports\' paths', { skip }, async () =>
   const r = await api('/people/career/team', token);
   assert.equal(r.status, 200);
   const row = r.body.team.find((x) => x.employee_id === empId);
-  assert.equal(row.target_role, 'L4');
+  assert.equal(row.target_role, 'Software Engineer III');
 });
 
 test('career path: an update replaces (upserts), not duplicates', { skip }, async () => {
   const { token } = await login('cp-emp@x.com');
-  await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'v2 of the plan' }) });
+  await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'Software Engineer III', plan: 'v2 of the plan' }) });
   const rows = await db.query(`SELECT COUNT(*)::int AS n FROM people.career_paths WHERE employee_id=$1`, [empId]);
   assert.equal(rows.rows[0].n, 1, 'upsert, not a second row');
 });
@@ -120,16 +142,16 @@ test('career path: editing is blocked outside the growth_planning phase', { skip
   const { token } = await login('cp-emp@x.com');
 
   await db.query(`UPDATE pms.cycles SET phase='kra_open' WHERE tenant_id=$1`, [t]);
-  const beforeLock = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'too early' }) });
+  const beforeLock = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'Software Engineer III', plan: 'too early' }) });
   assert.equal(beforeLock.status, 409);
   assert.match(beforeLock.body.error, /not open/);
 
   await db.query(`UPDATE pms.cycles SET phase='self_appraisal' WHERE tenant_id=$1`, [t]);
-  const afterWindow = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'too late' }) });
+  const afterWindow = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'Software Engineer III', plan: 'too late' }) });
   assert.equal(afterWindow.status, 409);
 
   await db.query(`UPDATE pms.cycles SET phase='growth_planning' WHERE tenant_id=$1`, [t]);
-  const duringWindow = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'L4', plan: 'right on time' }) });
+  const duringWindow = await api('/people/career/my-path', token, { method: 'PUT', body: JSON.stringify({ target_role: 'Software Engineer III', plan: 'right on time' }) });
   assert.equal(duringWindow.status, 200);
 
   const getResp = await api('/people/career/my-path', token);
@@ -142,7 +164,7 @@ test('career path: editing is blocked outside the growth_planning phase', { skip
 test('career path: expected timeline is saved and returned alongside target role', { skip }, async () => {
   const { token } = await login('cp-emp@x.com');
   const set = await api('/people/career/my-path', token, {
-    method: 'PUT', body: JSON.stringify({ target_role: 'L4', target_timeline: '12-18 months', plan: 'Grow into a tech-lead role' }),
+    method: 'PUT', body: JSON.stringify({ target_role: 'Software Engineer III', target_timeline: '12-18 months', plan: 'Grow into a tech-lead role' }),
   });
   assert.equal(set.status, 200);
 
@@ -153,37 +175,4 @@ test('career path: expected timeline is saved and returned alongside target role
   const teamView = await api('/people/career/team', mgrAuth.token);
   const row = teamView.body.team.find((x) => x.employee_id === empId);
   assert.equal(row.target_timeline, '12-18 months', 'manager view also surfaces the timeline');
-});
-
-// The one piece missing from career/matrix's existing GET/PUT, built
-// per a follow-up scoping conversation: HR previously had no way to
-// remove a mistaken or outdated role band/level entry.
-test('career framework: HR can delete a role band/level entry; requires admin; 404s on an entry that does not exist', { skip }, async () => {
-  const t = (await db.query(`SELECT tenant_id FROM core.employees WHERE id=$1`, [empId])).rows[0].tenant_id;
-  const admin = (await db.query(`INSERT INTO core.employees (tenant_id, name, email, status) VALUES ($1,'Career Admin','career-admin@x.com','active') RETURNING id`, [t])).rows[0];
-  const bcrypt = require('bcryptjs');
-  await db.query(`INSERT INTO core.local_credentials (tenant_id, email, password_hash) VALUES ($1,'career-admin@x.com',$2)`, [t, await bcrypt.hash('pass', 10)]);
-  await db.query(`INSERT INTO core.user_roles (tenant_id, email, role) VALUES ($1,'career-admin@x.com','admin')`, [t]);
-
-  const adminAuth = await login('career-admin@x.com');
-  const put = await api('/people/career/matrix', adminAuth.token, {
-    method: 'PUT', body: JSON.stringify({ role_band: 'L9-Test', level: 'Principal', expectations: 'Sets technical direction org-wide' }),
-  });
-  assert.equal(put.status, 200);
-
-  const listed = await api('/people/career/matrix', adminAuth.token);
-  assert.ok(listed.body.matrix.some((r) => r.role_band === 'L9-Test' && r.level === 'Principal'));
-
-  const empAuth = await login('cp-emp@x.com');
-  const blocked = await api('/people/career/matrix/L9-Test/Principal', empAuth.token, { method: 'DELETE' });
-  assert.equal(blocked.status, 403, 'delete requires admin, same as add/edit');
-
-  const del = await api('/people/career/matrix/L9-Test/Principal', adminAuth.token, { method: 'DELETE' });
-  assert.equal(del.status, 200);
-
-  const afterDelete = await api('/people/career/matrix', adminAuth.token);
-  assert.ok(!afterDelete.body.matrix.some((r) => r.role_band === 'L9-Test'), 'actually removed, not just marked');
-
-  const missing = await api('/people/career/matrix/L9-Test/Principal', adminAuth.token, { method: 'DELETE' });
-  assert.equal(missing.status, 404, 'deleting an entry that no longer exists is a clean 404, not a silent success');
 });

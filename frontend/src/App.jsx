@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText, UserCog, History, LayoutDashboard, Layers, GitBranch } from 'lucide-react';
+import { Target, ClipboardList, Users, Landmark, Sparkles, BarChart3, HeartHandshake, Star, LogOut, Upload, User, ShieldAlert, Award, Grid3x3, TrendingUp, Heart, Clock, MessageCircle, FileText, UserCog, History, LayoutDashboard, GitBranch } from 'lucide-react';
 import { api } from './utils/api';
 import MyKRASheetPage from './pages/MyKRASheetPage';
 import SelfAppraisalPage from './pages/SelfAppraisalPage';
@@ -15,7 +15,6 @@ import PeopleHubPage from './pages/PeopleHubPage';
 import DirectoryPage from './pages/DirectoryPage';
 import DepartmentHeadsPage from './pages/DepartmentHeadsPage';
 import CompletionReportPage from './pages/CompletionReportPage';
-import CareerFrameworkPage from './pages/CareerFrameworkPage';
 import CareerTransitionsPage from './pages/CareerTransitionsPage';
 import HistoryPage from './pages/HistoryPage';
 import TeamOverviewPage from './pages/TeamOverviewPage';
@@ -54,7 +53,6 @@ const NAV = [
     { to: '/admin/cycles', label: 'Cycles', icon: BarChart3 },
     { to: '/admin/calibration', label: 'Calibration', icon: Sparkles },
     { to: '/admin/completion-report', label: 'PMS Completion Report', icon: FileText, roles: ['admin', 'hr'] },
-    { to: '/admin/career-framework', label: 'Career Framework', icon: Layers, roles: ['admin', 'hr'] },
     { to: '/admin/career-transitions', label: 'Career Pathing Matrix', icon: GitBranch, roles: ['admin', 'hr'] },
     { to: '/admin/directory', label: 'Employees', icon: Upload, roles: ['admin', 'hr'] },
     { to: '/admin/department-heads', label: 'Department Heads', icon: UserCog, roles: ['admin', 'hr'] },
@@ -146,7 +144,6 @@ export default function App() {
             <Route path="/admin/calibration" element={<CalibrationPage />} />
             <Route path="/admin/directory" element={<RequireRole user={user} roles={['admin', 'hr']}><DirectoryPage /></RequireRole>} />
             <Route path="/admin/completion-report" element={<RequireRole user={user} roles={['admin', 'hr']}><CompletionReportPage /></RequireRole>} />
-            <Route path="/admin/career-framework" element={<RequireRole user={user} roles={['admin', 'hr']}><CareerFrameworkPage /></RequireRole>} />
             <Route path="/admin/career-transitions" element={<RequireRole user={user} roles={['admin', 'hr']}><CareerTransitionsPage /></RequireRole>} />
             <Route path="/admin/department-heads" element={<RequireRole user={user} roles={['admin', 'hr']}><DepartmentHeadsPage /></RequireRole>} />
             <Route path="/admin/kra-overview" element={<KraOrgOverviewPage />} />
