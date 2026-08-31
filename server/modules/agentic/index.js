@@ -382,4 +382,48 @@ Respond ONLY with JSON:
   } catch (e) { fail(res, e); }
 });
 
+// "AI auto-tag KRAs" — requested with a reference screenshot: read a
+// SAVED connect's discussion/achievements/blockers/feedback and suggest
+// which of the employee's KRAs it relates to, rather than requiring the
+// manager to pick manually every time. Never saves anything itself —
+// returns suggested_kra_ids for the person to review and apply via the
+// existing PUT /pms/connects/:id, same "draft, human decides" pattern as
+// every other AI feature here. Manager (the connect's own) or admin only.
+router.post('/connect-autotag', async (req, res) => {
+  try {
+    const { connect_id } = req.body || {};
+    if (!connect_id) return res.status(400).json({ error: 'connect_id required' });
+    const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [connect_id, T(req)])).rows[0];
+    if (!cn) return res.status(404).json({ error: 'connect not found' });
+    if (cn.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your connect' });
+
+    const c = await activeCycle(T(req));
+    const sheet = c ? (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, cn.employee_id])).rows[0] : null;
+    const kras = sheet ? (await db.query(`SELECT id, title FROM pms.kras WHERE sheet_id=$1 ORDER BY sort_order`, [sheet.id])).rows : [];
+    if (!kras.length) return res.status(422).json({ error: 'This employee has no KRAs to tag against this cycle.' });
+
+    const input = {
+      kras: kras.map((k) => ({ id: k.id, title: k.title })),
+      topic: cn.topic || null,
+      discussion: cn.discussion_notes || cn.notes || null,
+      achievements: cn.achievements || null,
+      blockers: cn.blockers || null,
+      feedback: cn.feedback || null,
+    };
+    const out = await ai.narrate({
+      tenantId: T(req), kind: 'connect_autotag', ref: { connect_id },
+      requestedBy: req.user.email, input, maxTokens: 400,
+      system: `You are given a list of an employee's KRAs (each with an id and title) and the content of one
+logged 1-on-1 connect (topic, discussion, achievements, blockers, feedback). Decide which of the
+listed KRAs (by id) this connect is actually about — usually 0-3 of them. Only include a KRA
+whose title is genuinely reflected in the connect's content; do not include one just because it
+exists. If none of the KRAs are clearly relevant, return an empty list rather than guessing.
+Respond ONLY with JSON: {"suggested_kra_ids":["..."],"reasoning":"one sentence"}`,
+    });
+    const validIds = new Set(kras.map((k) => k.id));
+    const suggested = Array.isArray(out.suggested_kra_ids) ? out.suggested_kra_ids.filter((id) => validIds.has(id)) : [];
+    res.json({ ok: true, suggested_kra_ids: suggested, reasoning: out.reasoning || null, kras });
+  } catch (e) { fail(res, e); }
+});
+
 module.exports = { router };

@@ -1755,7 +1755,9 @@ router.get('/connects', async (req, res) => {
     const r = await db.query(
       `SELECT cn.*, e.name AS employee_name, m.name AS manager_name,
               COALESCE((SELECT json_agg(json_build_object('id', ai.id, 'description', ai.description, 'due_date', ai.due_date, 'done', ai.done) ORDER BY ai.created_at)
-                        FROM pms.connect_action_items ai WHERE ai.connect_id=cn.id), '[]') AS action_items
+                        FROM pms.connect_action_items ai WHERE ai.connect_id=cn.id), '[]') AS action_items,
+              COALESCE((SELECT json_agg(json_build_object('id', k.id, 'title', k.title))
+                        FROM pms.kras k WHERE k.id = ANY(cn.kra_ids)), '[]') AS linked_kras
          FROM pms.connects cn JOIN core.employees e ON e.id=cn.employee_id JOIN core.employees m ON m.id=cn.manager_id
         WHERE cn.tenant_id=$1 AND (cn.employee_id=$2 OR cn.manager_id=$2) ${mine ? 'AND cn.employee_id=$3' : ''}
         ORDER BY cn.held_at DESC LIMIT 100`,
@@ -1837,6 +1839,23 @@ router.get('/connects/kra-options/:employeeId', async (req, res) => {
 // manager can log now and sign off after reviewing (e.g. after editing
 // notes or reading the AI insights below), rather than the act of
 // creation being silently treated as sign-off.
+// Requested: "AI auto-tag KRAs" — the manual KRA-linking chips already
+// existed at CREATE time, but nothing let anyone change the links on an
+// already-saved connect. Kept deliberately narrow (kra_ids only, not a
+// full edit-everything route) — that's all this feature needs.
+router.put('/connects/:id', async (req, res) => {
+  try {
+    const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!cn) return res.status(404).json({ error: 'connect not found' });
+    if (cn.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your connect to edit' });
+    if (cn.signed_off) return res.status(409).json({ error: 'Already signed off — locked' });
+    const { kra_ids } = req.body || {};
+    if (!Array.isArray(kra_ids)) return res.status(400).json({ error: 'kra_ids array required' });
+    await db.query(`UPDATE pms.connects SET kra_ids=$2 WHERE id=$1`, [cn.id, kra_ids]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/connects/:id/sign-off', async (req, res) => {
   try {
     const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];

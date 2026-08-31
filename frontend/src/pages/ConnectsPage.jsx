@@ -192,6 +192,18 @@ function ConnectRow({ cn, me, reload }) {
   const [insight, setInsight] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // Requested with a reference screenshot: "AI auto-tag KRAs" — suggests
+  // which of the employee's KRAs this connect relates to, from its own
+  // achievements/blockers/feedback/discussion text, instead of only ever
+  // picking KRAs manually at creation time (the only way this worked
+  // before). Never auto-saves — shows a suggestion the manager reviews
+  // and applies, same "draft, human decides" pattern as every other AI
+  // feature here.
+  const [tagging, setTagging] = useState(false);
+  const [editingKras, setEditingKras] = useState(false);
+  const [kraOptions, setKraOptions] = useState(null);
+  const [selectedKraIds, setSelectedKraIds] = useState([]);
+  const [tagReasoning, setTagReasoning] = useState(null);
 
   const signOff = async () => {
     setErr(null);
@@ -203,6 +215,31 @@ function ConnectRow({ cn, me, reload }) {
     try { const r = await api('/agentic/connect-insights', { method: 'POST', body: JSON.stringify({ employee_id: cn.employee_id }) }); setInsight(r); }
     catch (e) { setErr(e.message); }
     setBusy(false);
+  };
+  const startEditingKras = async () => {
+    setErr(null); setEditingKras(true); setTagReasoning(null);
+    setSelectedKraIds((cn.kra_ids || []).slice());
+    if (!kraOptions) {
+      try { const r = await api(`/pms/connects/kra-options/${cn.employee_id}`); setKraOptions(r.kras || []); }
+      catch (e) { setErr(e.message); }
+    }
+  };
+  const autoTag = async () => {
+    setTagging(true); setErr(null);
+    try {
+      const r = await api('/agentic/connect-autotag', { method: 'POST', body: JSON.stringify({ connect_id: cn.id }) });
+      if (!kraOptions) setKraOptions(r.kras);
+      setSelectedKraIds(r.suggested_kra_ids);
+      setTagReasoning(r.reasoning);
+      setEditingKras(true);
+    } catch (e) { setErr(e.message); }
+    setTagging(false);
+  };
+  const toggleSelectedKra = (id) => setSelectedKraIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  const saveKras = async () => {
+    setErr(null);
+    try { await api(`/pms/connects/${cn.id}`, { method: 'PUT', body: JSON.stringify({ kra_ids: selectedKraIds }) }); setEditingKras(false); reload(); }
+    catch (e) { setErr(e.message); }
   };
 
   return (
@@ -228,9 +265,44 @@ function ConnectRow({ cn, me, reload }) {
         {cn.feedback && <p><b className="text-navy-500">Feedback:</b> {cn.feedback}</p>}
         {!cn.achievements && !cn.blockers && !cn.feedback && cn.notes && <p>{cn.notes}</p>}
       </div>
-      {Array.isArray(cn.kra_ids) && cn.kra_ids.length > 0 && (
-        <p className="text-[11px] text-navy-400">Linked to {cn.kra_ids.length} KRA{cn.kra_ids.length === 1 ? '' : 's'}</p>
-      )}
+      <div className="border-t border-navy-100 pt-2 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold text-navy-400 uppercase tracking-wide">
+            Linked KRAs {!editingKras && !(cn.linked_kras || []).length && <span className="normal-case font-normal italic text-navy-300">— no KRAs linked</span>}
+          </p>
+          {!cn.signed_off && (!me || me.id === cn.manager_id) && !editingKras && (
+            <button className="chip bg-violet-50 text-violet-700 flex items-center gap-1" disabled={tagging} onClick={autoTag}>
+              <Sparkles size={11} />{tagging ? 'Thinking…' : 'AI auto-tag KRAs'}
+            </button>
+          )}
+        </div>
+        {!editingKras && (cn.linked_kras || []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {cn.linked_kras.map(k => <span key={k.id} className="chip bg-navy-50 text-navy-600">{k.title}</span>)}
+            {!cn.signed_off && (!me || me.id === cn.manager_id) && (
+              <button className="text-[11px] text-navy-400 underline" onClick={startEditingKras}>edit</button>
+            )}
+          </div>
+        )}
+        {editingKras && (
+          <div className="space-y-1.5">
+            {tagReasoning && <p className="text-[11px] text-violet-600 italic">"{tagReasoning}"</p>}
+            {!kraOptions && <p className="text-xs text-navy-400">Loading KRAs…</p>}
+            {kraOptions && !kraOptions.length && <p className="text-xs text-navy-400">This employee has no KRAs this cycle.</p>}
+            <div className="flex flex-wrap gap-1.5">
+              {(kraOptions || []).map(k => (
+                <button key={k.id} type="button"
+                  className={`chip ${selectedKraIds.includes(k.id) ? 'bg-brand-500 text-white' : 'bg-navy-50 text-navy-600'}`}
+                  onClick={() => toggleSelectedKra(k.id)}>{k.title}</button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-sec !py-1" onClick={() => setEditingKras(false)}>Cancel</button>
+              <button className="btn-pri !py-1" onClick={saveKras}>Save</button>
+            </div>
+          </div>
+        )}
+      </div>
       <div className="flex gap-2">
         {!cn.signed_off && (!me || me.id === cn.manager_id) && <button className="btn-sec" onClick={signOff}>Sign off</button>}
         <button className="btn-sec" disabled={busy} onClick={askInsights}><Sparkles size={12} className="inline mr-1 text-amber-500" />{busy ? 'Thinking…' : 'AI insights'}</button>
