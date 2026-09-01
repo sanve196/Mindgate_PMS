@@ -358,7 +358,14 @@ Respond ONLY with JSON:
 "themes":[{"name":"...","summary":"1-2 sentences","related_kra":"KRA title or null"}],
 "suggested_followups":["..."]}`,
     });
-    res.json({ ok: true, ...out });
+    // Bug found live: ai.narrate() returns {id, created_at, draft} — the
+    // model's actual JSON output is nested under `draft`, not spread at
+    // the top level. `{ ok: true, ...out }` was putting id/created_at
+    // into the response and leaving headline/status/themes/
+    // suggested_followups all undefined — exactly the reported symptom
+    // (blank panel), regardless of how good the prompt was. Fixed by
+    // spreading out.draft instead of out itself.
+    res.json({ ok: true, ...out.draft });
   } catch (e) { fail(res, e); }
 });
 
@@ -440,9 +447,15 @@ whose title is genuinely reflected in the connect's content; do not include one 
 exists. If none of the KRAs are clearly relevant, return an empty list rather than guessing.
 Respond ONLY with JSON: {"suggested_kra_ids":["..."],"reasoning":"one sentence"}`,
     });
+    // Same bug as connect-insights above: the AI's actual output is at
+    // out.draft.suggested_kra_ids, not out.suggested_kra_ids — reading it
+    // at the wrong level meant Array.isArray(undefined) was always
+    // false, so `suggested` was always [], regardless of what the model
+    // actually returned. This is exactly why the auto-tag suggestion
+    // never had anything pre-selected to save.
     const validIds = new Set(kras.map((k) => k.id));
-    const suggested = Array.isArray(out.suggested_kra_ids) ? out.suggested_kra_ids.filter((id) => validIds.has(id)) : [];
-    res.json({ ok: true, suggested_kra_ids: suggested, reasoning: out.reasoning || null, kras });
+    const suggested = Array.isArray(out.draft.suggested_kra_ids) ? out.draft.suggested_kra_ids.filter((id) => validIds.has(id)) : [];
+    res.json({ ok: true, suggested_kra_ids: suggested, reasoning: out.draft.reasoning || null, kras });
   } catch (e) { fail(res, e); }
 });
 
