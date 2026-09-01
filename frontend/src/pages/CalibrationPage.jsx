@@ -122,10 +122,7 @@ function CalRow({ r, reload }) {
         <td className="px-3 py-2">{r.department || '—'}</td>
         <td className="px-3 py-2 text-right font-mono">{r.manager_rating ?? '—'}</td>
         <td className="px-3 py-2 text-right font-mono">{r.hod_rating ?? '—'}</td>
-        <td className="px-3 py-2 text-right font-mono font-bold">
-          {r.proposed ?? '—'}
-          {wasAdjusted && <span className="chip bg-amber-100 text-amber-700 ml-1.5 !text-[9px] !py-0">adjusted</span>}
-        </td>
+        <td className="px-3 py-2 text-right font-mono font-bold">{r.proposed ?? '—'}</td>
         <td className="px-3 py-2">
           <select className="inp !py-1 !text-[11px] w-auto" value={box} onChange={e => saveBox(e.target.value)}>
             <option value="">—</option>{NINE_BOX.map(b => <option key={b}>{b}</option>)}
@@ -139,12 +136,16 @@ function CalRow({ r, reload }) {
           {err && <p className="text-[10px] text-rose-600">{err}</p>}
         </td>
       </tr>
+      {/* Simplified per direct request: badge removed from Final Rating,
+          and this row now shows just "adjusted X -> Y" instead of the
+          reason/adjusted-by/date inline. That detail isn't thrown away —
+          it's on the title attribute, so it's still reachable on hover
+          rather than gone from the page entirely. */}
       {wasAdjusted && (
         <tr className="bg-amber-50/40">
           <td colSpan={7} className="px-3 pb-2 -mt-1">
-            <p className="text-[11px] text-amber-800">
-              <b>{preAdjustment} → {r.proposed}:</b> {r.adjustment_reason}
-              <span className="text-amber-500"> — {r.adjusted_by}{r.adjusted_at ? `, ${new Date(r.adjusted_at).toLocaleDateString()}` : ''}</span>
+            <p className="text-[11px] text-amber-800" title={`${r.adjustment_reason} — ${r.adjusted_by}${r.adjusted_at ? `, ${new Date(r.adjusted_at).toLocaleDateString()}` : ''}`}>
+              adjusted <b>{preAdjustment} → {r.proposed}</b>
             </p>
           </td>
         </tr>
