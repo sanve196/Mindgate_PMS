@@ -33,11 +33,11 @@ import ClosureLettersPage from './pages/ClosureLettersPage';
 const NAV = [
   { group: 'My Performance', items: [
     { to: '/my/kras', label: 'My KRAs', icon: Target },
-    { to: '/my/self-appraisal', label: 'Self-Appraisal', icon: ClipboardList },
-    { to: '/my/rating', label: 'My Rating', icon: Star },
-    { to: '/my/midyear', label: 'Mid-Year Review', icon: Clock },
     { to: '/my/growth', label: 'My Growth', icon: TrendingUp },
+    { to: '/my/midyear', label: 'Mid-Year Review', icon: Clock },
+    { to: '/my/self-appraisal', label: 'Self-Appraisal', icon: ClipboardList },
     { to: '/my/annual-review', label: 'Annual Review', icon: Award },
+    { to: '/my/rating', label: 'My Rating', icon: Star },
     { to: '/my/history', label: 'Past Cycles', icon: History },
     { to: '/my/pulse-check', label: 'Pulse Check', icon: Heart },
   ]},
