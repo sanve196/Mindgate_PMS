@@ -119,15 +119,20 @@ export default function SelfAppraisalPage() {
             <p className="text-sm font-semibold">{k.title}</p>
             <span className="text-[11px] text-navy-400">{k.weight}%</span>
           </div>
-          {!isAnnual && (
-            <div className="flex flex-wrap gap-1.5">
-              {(data.cycle.rating_scale || []).map(s => (
-                <button key={s.value} type="button" disabled={!open}
-                  className={`chip ${Number((entries[k.id] || {}).self_rating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
-                  onClick={() => setKraRating(k.id, s.value)}>{KRA_GRADE_LABEL[s.value] || s.label}</button>
-              ))}
-            </div>
-          )}
+          {/* Requested: per-KRA A+-C ratings visible on annual cycles too,
+              not just mid-year — previously hidden here specifically to
+              avoid "which rating counts" confusion, since the 7-parameter
+              score above is what officially governs the annual rating.
+              Kept that distinction clear with the note below rather than
+              silently reversing it. */}
+          <div className="flex flex-wrap gap-1.5">
+            {(data.cycle.rating_scale || []).map(s => (
+              <button key={s.value} type="button" disabled={!open}
+                className={`chip ${Number((entries[k.id] || {}).self_rating) === s.value ? 'bg-navy-700 text-white' : 'bg-navy-50 text-navy-600'}`}
+                onClick={() => setKraRating(k.id, s.value)}>{KRA_GRADE_LABEL[s.value] || s.label}</button>
+            ))}
+          </div>
+          {isAnnual && <p className="text-[10px] text-navy-400">For your own reference — the 7 parameters above govern your official annual rating, not this.</p>}
           <textarea className="inp" rows={3} placeholder="What you achieved against this KRA — be specific, name evidence"
             value={(entries[k.id] || {}).narrative || ''} onChange={setEntry(k.id, 'narrative')} disabled={!open} />
         </div>

@@ -87,12 +87,21 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
           {t.could_improve && <p><b>Could improve:</b> {t.could_improve}</p>}
         </div>
       )}
-      {cycleType === 'annual' ? (
+      {/* Requested: per-KRA A+-C ratings visible on Annual Manager
+          Evaluation too, not just Mid-Year — previously mutually
+          exclusive with the 7-parameter scoring. The 7 parameters remain
+          what officially drives the annual overall_rating (unchanged,
+          backend-enforced); PerKraRating's onOverallChange is a no-op on
+          annual specifically so it can't overwrite that value — it only
+          drives f.overall_rating on non-annual cycles, where it's the
+          sole source of the overall rating. */}
+      {cycleType === 'annual' && (
         <ParameterScoring employeeId={t.employee_id} editable={editable} initialRating={t.overall_rating} />
-      ) : (
-        <PerKraRating employeeId={t.employee_id} scale={scale} editable={editable} overallRating={f.overall_rating}
-          selfEntries={t.self_entries || {}} onOverallChange={(v) => setF(s => ({ ...s, overall_rating: v }))} />
       )}
+      <PerKraRating employeeId={t.employee_id} scale={scale} editable={editable} overallRating={cycleType === 'annual' ? null : f.overall_rating}
+        selfEntries={t.self_entries || {}} onOverallChange={cycleType === 'annual' ? () => {} : (v) => setF(s => ({ ...s, overall_rating: v }))}
+        hideOverallFooter={cycleType === 'annual'} />
+      {cycleType === 'annual' && <p className="text-[10px] text-navy-400 -mt-2">Per-KRA ratings here are for reference — the 7 parameters above govern the official annual rating.</p>}
       <div className="flex flex-wrap items-center gap-2">
         {editable && (
           <button className="btn-sec" disabled={drafting} onClick={askDraft}>
@@ -133,7 +142,7 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
 // overall computed server-side as the weighted average — see
 // PUT /team/evaluations/:employeeId. Employee's own self-rating per KRA
 // is shown alongside (read-only) for direct comparison while rating.
-function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries, onOverallChange }) {
+function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries, onOverallChange, hideOverallFooter }) {
   const [kras, setKras] = useState(null);
   const [entries, setEntries] = useState({});
   const [err, setErr] = useState(null);
@@ -199,14 +208,16 @@ function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries,
           </div>
         );
       })}
-      <p className="text-sm">
-        <span className="font-semibold">Overall rating: </span>
-        {overallRating != null ? (
-          <span className="text-emerald-700 font-bold">{OVERALL_DESCRIPTIVE_LABEL[nearestWholeValue(Number(overallRating), scale)] || overallRating} ({Number(overallRating).toFixed(1)})</span>
-        ) : (
-          <span className="text-navy-400">— rate each KRA above to see the weighted average</span>
-        )}
-      </p>
+      {!hideOverallFooter && (
+        <p className="text-sm">
+          <span className="font-semibold">Overall rating: </span>
+          {overallRating != null ? (
+            <span className="text-emerald-700 font-bold">{OVERALL_DESCRIPTIVE_LABEL[nearestWholeValue(Number(overallRating), scale)] || overallRating} ({Number(overallRating).toFixed(1)})</span>
+          ) : (
+            <span className="text-navy-400">— rate each KRA above to see the weighted average</span>
+          )}
+        </p>
+      )}
     </div>
   );
 }
