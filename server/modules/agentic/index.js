@@ -128,7 +128,11 @@ submitted self-reflection. Ground everything in the input; invent nothing. Never
 imply a numeric rating — judgement is the manager's alone.
 Respond ONLY with JSON: {"narrative":"2-4 sentences","gaps":["anything the input lacked"]}`,
     });
-    res.json({ ok: true, ...out });
+    // Same bug as connect-insights/connect-autotag, fixed the same way:
+    // ai.narrate() returns { id, created_at, draft } — the actual output
+    // is under .draft. MidYearReviewPage.jsx already reads draft.narrative
+    // (top-level), so spreading out.draft is what actually matches it.
+    res.json({ ok: true, ...out.draft });
   } catch (e) { fail(res, e); }
 });
 
@@ -338,7 +342,7 @@ router.post('/connect-insights', async (req, res) => {
     };
     const out = await ai.narrate({
       tenantId: T(req), kind: 'connect_insights', ref: { employee_id },
-      requestedBy: req.user.email, input, maxTokens: 1200,
+      requestedBy: req.user.email, input, maxTokens: 700,
       system: `You read a manager's own logged 1-on-1 notes about ONE employee across recent
 Quarterly Connects (discussion narrative, plus any logged achievements/blockers/feedback) and
 produce a read on their overall progress and performance this cycle, not just a list of topics.
@@ -350,12 +354,17 @@ blockers/feedback/discussion — do not wait for a pattern to repeat, and do not
 anything as "recurring" or say there's nothing to report. Only use "recurring" language for a
 theme once it genuinely appears across more than one connect in the input.
 
+Keep everything SHORT — this is a glance-able panel, not a report. Headline: one short
+sentence, under 20 words. Each theme's summary: one short sentence, under 20 words, not a
+paragraph. Each follow-up: a short actionable phrase, under 15 words, not a full sentence with
+justification. 2-4 themes and 2-4 follow-ups is enough; do not pad to fill space.
+
 Ground everything in the input; invent nothing not implied by it. Never suggest or imply a
 numeric rating — "status" is a qualitative read (e.g. "On Track", "Concerned", "Excelling",
 "At Risk"), not a score.
 Respond ONLY with JSON:
 {"headline":"one sentence verdict on their progress/performance this cycle","status":"On Track|Concerned|Excelling|At Risk",
-"themes":[{"name":"...","summary":"1-2 sentences","related_kra":"KRA title or null"}],
+"themes":[{"name":"...","summary":"one short sentence, under 20 words","related_kra":"KRA title or null"}],
 "suggested_followups":["..."]}`,
     });
     // Bug found live: ai.narrate() returns {id, created_at, draft} — the
