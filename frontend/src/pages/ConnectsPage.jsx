@@ -270,7 +270,11 @@ function ConnectRow({ cn, me, reload }) {
           <p className="text-[11px] font-semibold text-navy-400 uppercase tracking-wide">
             Linked KRAs {!editingKras && !(cn.linked_kras || []).length && <span className="normal-case font-normal italic text-navy-300">— no KRAs linked</span>}
           </p>
-          {!cn.signed_off && (!me || me.id === cn.manager_id) && !editingKras && (
+          {/* Widened per a direct follow-up: an employee can now auto-tag
+              and edit KRA links on a connect that's about THEM, not just
+              the manager — Sign off below stays manager-only on purpose,
+              that's specifically the manager's approval step. */}
+          {!cn.signed_off && (!me || me.id === cn.manager_id || me.id === cn.employee_id) && !editingKras && (
             <button className="chip bg-violet-50 text-violet-700 flex items-center gap-1" disabled={tagging} onClick={autoTag}>
               <Sparkles size={11} />{tagging ? 'Thinking…' : 'AI auto-tag KRAs'}
             </button>
@@ -279,7 +283,7 @@ function ConnectRow({ cn, me, reload }) {
         {!editingKras && (cn.linked_kras || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {cn.linked_kras.map(k => <span key={k.id} className="chip bg-navy-50 text-navy-600">{k.title}</span>)}
-            {!cn.signed_off && (!me || me.id === cn.manager_id) && (
+            {!cn.signed_off && (!me || me.id === cn.manager_id || me.id === cn.employee_id) && (
               <button className="text-[11px] text-navy-400 underline" onClick={startEditingKras}>edit</button>
             )}
           </div>

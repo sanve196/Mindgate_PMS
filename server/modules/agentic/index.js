@@ -298,12 +298,18 @@ router.get('/drafts', async (req, res) => {
 // are now included in the input alongside the discussion narrative, since
 // those are exactly the signal a progress/performance read should draw
 // on, not just the free-text discussion.
-// UPDATED again: previously required pms_team_eval unconditionally, so an
-// employee could never see AI insights about their OWN logged connects —
-// only their manager could. Per a direct request ("employee should have
-// AI insight option... after saving"), self-view is now allowed for
-// anyone looking at their own employee_id; viewing someone ELSE's still
-// requires pms_team_eval + being their manager (or pms_admin), unchanged.
+// UPDATED again: reworked after a live report — with only ONE connect
+// logged, the panel came back with themes/follow-ups both empty AND no
+// headline or status at all. Root cause was in the wording, not the
+// code: the prompt asked for "recurring" themes specifically, which
+// reasonably led the model to treat a single connect as "nothing
+// recurring yet" — including for headline/status, which were never
+// meant to depend on having multiple connects in the first place. A
+// reference screenshot confirmed the expected behaviour: a full panel
+// (headline, status, real themes, real follow-ups) from ONE connect's
+// own content. Fixed by rewording the prompt only — same input shape,
+// same output JSON schema, no route or schema change, so there was
+// nothing to risk in the surrounding code.
 router.post('/connect-insights', async (req, res) => {
   try {
     const { employee_id } = req.body || {};
@@ -336,6 +342,14 @@ router.post('/connect-insights', async (req, res) => {
       system: `You read a manager's own logged 1-on-1 notes about ONE employee across recent
 Quarterly Connects (discussion narrative, plus any logged achievements/blockers/feedback) and
 produce a read on their overall progress and performance this cycle, not just a list of topics.
+
+You ALWAYS produce a headline, a status, at least one theme, and at least one follow-up —
+this works from a SINGLE connect just as well as several. With only one connect
+(connects_summarised = 1), derive every theme directly from THAT connect's own achievements/
+blockers/feedback/discussion — do not wait for a pattern to repeat, and do not describe
+anything as "recurring" or say there's nothing to report. Only use "recurring" language for a
+theme once it genuinely appears across more than one connect in the input.
+
 Ground everything in the input; invent nothing not implied by it. Never suggest or imply a
 numeric rating — "status" is a qualitative read (e.g. "On Track", "Concerned", "Excelling",
 "At Risk"), not a score.
@@ -395,7 +409,13 @@ router.post('/connect-autotag', async (req, res) => {
     if (!connect_id) return res.status(400).json({ error: 'connect_id required' });
     const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [connect_id, T(req)])).rows[0];
     if (!cn) return res.status(404).json({ error: 'connect not found' });
-    if (cn.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your connect' });
+    // Widened per a direct follow-up: an employee should be able to
+    // auto-tag KRAs on a connect that's about THEM, regardless of who
+    // logged it — not manager-only, matching how self-view already works
+    // for connect-insights above.
+    if (cn.manager_id !== req.user.id && cn.employee_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) {
+      return res.status(403).json({ error: 'Not your connect' });
+    }
 
     const c = await activeCycle(T(req));
     const sheet = c ? (await db.query(`SELECT id FROM pms.kra_sheets WHERE cycle_id=$1 AND employee_id=$2`, [c.id, cn.employee_id])).rows[0] : null;

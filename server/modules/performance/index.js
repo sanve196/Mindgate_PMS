@@ -1862,7 +1862,13 @@ router.put('/connects/:id', async (req, res) => {
   try {
     const cn = (await db.query(`SELECT * FROM pms.connects WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
     if (!cn) return res.status(404).json({ error: 'connect not found' });
-    if (cn.manager_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: 'Not your connect to edit' });
+    // Widened alongside connect-autotag: an employee needs to be able to
+    // save the KRA links on a connect that's about THEM, not just the
+    // manager — otherwise the auto-tag suggestion above has no way to
+    // actually be applied when the employee is the one using it.
+    if (cn.manager_id !== req.user.id && cn.employee_id !== req.user.id && !(await hasPermission(req.user, 'pms_admin'))) {
+      return res.status(403).json({ error: 'Not your connect to edit' });
+    }
     if (cn.signed_off) return res.status(409).json({ error: 'Already signed off — locked' });
     const { kra_ids } = req.body || {};
     if (!Array.isArray(kra_ids)) return res.status(400).json({ error: 'kra_ids array required' });

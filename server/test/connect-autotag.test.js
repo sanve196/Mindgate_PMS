@@ -1,8 +1,11 @@
 // node --test — "AI auto-tag KRAs" + PUT /connects/:id (editing an
 // already-saved connect's linked KRAs). Requested with a reference
 // screenshot after confirming the app previously had no such feature —
-// only manual KRA-linking at creation time. Real Postgres, real HTTP
-// surface, skips cleanly without DATABASE_URL.
+// only manual KRA-linking at creation time. Widened in a later round so
+// the connect's own EMPLOYEE can use both, not just the manager — an
+// employee should be able to tag KRAs on a connect that's about them,
+// regardless of who logged it. Real Postgres, real HTTP surface, skips
+// cleanly without DATABASE_URL.
 const { test, after, before } = require('node:test');
 const assert = require('node:assert');
 
@@ -111,4 +114,28 @@ test('connect-autotag: requires connect_id, blocks an unrelated manager, returns
   assert.notEqual(r.status, 400);
   assert.notEqual(r.status, 403);
   assert.notEqual(r.status, 422, 'the employee has KRAs configured, so this should not be the "no KRAs" guard');
+});
+
+// The connectId used above got signed off at the end of the first test,
+// so this uses a fresh connect — the employee it's ABOUT should be able
+// to auto-tag and edit its KRA links themselves, even though their
+// manager is the one who logged it.
+test('the connect\'s own employee can also auto-tag and edit KRA links, not just the manager — a truly unrelated person still cannot', { skip }, async () => {
+  const t = (await db.query(`SELECT tenant_id FROM core.employees WHERE id=$1`, [empId])).rows[0].tenant_id;
+  const mgr = (await db.query(`SELECT id FROM core.employees WHERE email='cat-mgr@x.com' AND tenant_id=$1`, [t])).rows[0];
+  const cn2 = (await db.query(
+    `INSERT INTO pms.connects (tenant_id, manager_id, employee_id, held_at, topic, discussion_notes) VALUES ($1,$2,$3,'2026-06-15','Follow-up','Second connect, logged by the manager') RETURNING id`,
+    [t, mgr.id, empId])).rows[0];
+
+  const empAuth = await login('cat-emp@x.com');
+  const strangerAuth = await login('cat-stranger@x.com');
+
+  const stillBlocked = await api('/agentic/connect-autotag', strangerAuth.token, { method: 'POST', body: JSON.stringify({ connect_id: cn2.id }) });
+  assert.equal(stillBlocked.status, 403, 'a truly unrelated person is still blocked after the widening');
+
+  const autotag = await api('/agentic/connect-autotag', empAuth.token, { method: 'POST', body: JSON.stringify({ connect_id: cn2.id }) });
+  assert.notEqual(autotag.status, 403, 'the employee this connect is ABOUT can now use auto-tag, even though their manager logged it');
+
+  const put = await api(`/pms/connects/${cn2.id}`, empAuth.token, { method: 'PUT', body: JSON.stringify({ kra_ids: [kraAId] }) });
+  assert.equal(put.status, 200, 'and can save the result themselves');
 });
