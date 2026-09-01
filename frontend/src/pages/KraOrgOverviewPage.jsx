@@ -143,16 +143,47 @@ function OnBehalfEditor({ employeeId, onDone }) {
   if (!sheet) return <p className="text-xs text-navy-400">Loading…</p>;
   if (sheet.status === 'approved') return <p className="text-xs text-navy-400">Sheet is approved — return it before editing on behalf.</p>;
 
+  // Fixed: same root cause as the earlier "7 Organizational Parameters"
+  // bug — a flex row where the title field (flex-1) shared space with a
+  // fixed-width weight field, both carrying the shared .inp class's own
+  // width:100%, is fragile and could render the title collapsed to a
+  // sliver next to an oversized weight box. Replaced with an explicit
+  // grid, same fix as that earlier round. This was purely a display bug
+  // — GET /hr/kra-sheet/:employeeId already returns real KRA titles
+  // (confirmed by the KRA count shown on the row before expanding); nothing
+  // here was actually blank in the data.
+  const blankCount = kras.filter(k => !(k.title || '').trim()).length;
+
   return (
     <div className="bg-navy-50 rounded-lg p-3 space-y-2">
-      {kras.map((k, i) => (
-        <div key={i} className="flex gap-1.5 items-center">
-          <input className="inp flex-1" placeholder="KRA title" value={k.title} onChange={e => update(i, 'title', e.target.value)} />
-          <input className="inp w-20 text-right" type="number" value={k.weight} onChange={e => update(i, 'weight', e.target.value)} />
-          <span className="text-[10px] text-navy-400">%</span>
-          <button className="btn-sec !p-1.5" onClick={() => remove(i)}><Trash2 size={12} /></button>
-        </div>
-      ))}
+      {blankCount > 0 && (
+        <p className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+          {blankCount} KRA{blankCount === 1 ? '' : 's'} {blankCount === 1 ? 'has' : 'have'} no title set — highlighted below.
+        </p>
+      )}
+      <div className="grid gap-1.5" style={{ gridTemplateColumns: '2rem 1fr 6rem 2rem' }}>
+        <span className="lbl mb-0">#</span>
+        <span className="lbl mb-0">KRA Title</span>
+        <span className="lbl mb-0 text-right">Weight %</span>
+        <span></span>
+        {kras.map((k, i) => {
+          const blank = !(k.title || '').trim();
+          return (
+            <div key={i} className="contents">
+              <div className="flex items-center justify-center text-xs font-semibold text-navy-400">{i + 1}</div>
+              <input
+                className={`inp ${blank ? '!border-rose-300 !bg-rose-50/50' : ''}`}
+                placeholder="KRA title" value={k.title} onChange={e => update(i, 'title', e.target.value)}
+              />
+              <div className="flex items-center gap-1">
+                <input className="inp text-right" type="number" value={k.weight} onChange={e => update(i, 'weight', e.target.value)} />
+                <span className="text-[10px] text-navy-400">%</span>
+              </div>
+              <button className="btn-sec !p-1.5 justify-self-start" onClick={() => remove(i)}><Trash2 size={12} /></button>
+            </div>
+          );
+        })}
+      </div>
       <div className="flex items-center gap-2">
         <button className="btn-sec" onClick={add}><Plus size={12} className="inline mr-1" />Add KRA</button>
         <span className={`text-xs font-semibold ${total === 100 ? 'text-emerald-700' : 'text-rose-600'}`}>Total: {total}%</span>
