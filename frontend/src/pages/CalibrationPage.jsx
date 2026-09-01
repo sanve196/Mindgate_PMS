@@ -60,11 +60,24 @@ export default function CalibrationPage() {
         </div>
       </div>
       <div className="card overflow-x-auto">
-        <table className="w-full text-xs">
+        {/* table-fixed + explicit widths on the header row: with auto
+            layout, the browser infers each column's width from ALL rows
+            (including the wide colSpan=7 adjustment-reason row below),
+            which could shift column boundaries in ways not visible just
+            from reading the code. Fixed layout makes widths deterministic
+            from these header cells alone — every other row, including
+            that spanning one, has to respect them. */}
+        <table className="w-full text-xs table-fixed">
           <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
-            <tr><th className="text-left px-3 py-2">Employee</th><th className="text-left px-3 py-2">Dept</th>
-              <th className="text-right px-3 py-2">Mgr</th><th className="text-right px-3 py-2">Delivery Head</th>
-              <th className="text-right px-3 py-2">Final Rating</th><th className="text-left px-3 py-2">9-box</th><th className="text-left px-3 py-2">Adjust Rating</th></tr>
+            <tr>
+              <th className="text-left px-3 py-2 w-[16%]">Employee</th>
+              <th className="text-left px-3 py-2 w-[10%]">Dept</th>
+              <th className="text-right px-3 py-2 w-[8%]">Mgr</th>
+              <th className="text-right px-3 py-2 w-[12%]">Delivery Head</th>
+              <th className="text-right px-3 py-2 w-[14%]">Final Rating</th>
+              <th className="text-left px-3 py-2 w-[16%]">9-box</th>
+              <th className="text-left px-3 py-2 w-[24%]">Adjust Rating</th>
+            </tr>
           </thead>
           <tbody className="divide-y divide-navy-100">
             {data.rows.map(r => <CalRow key={r.employee_id} r={r} reload={load} />)}
