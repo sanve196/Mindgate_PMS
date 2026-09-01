@@ -64,7 +64,7 @@ export default function CalibrationPage() {
           <thead className="bg-navy-50 text-[10px] uppercase tracking-wide text-navy-500">
             <tr><th className="text-left px-3 py-2">Employee</th><th className="text-left px-3 py-2">Dept</th>
               <th className="text-right px-3 py-2">Mgr</th><th className="text-right px-3 py-2">Delivery Head</th>
-              <th className="text-right px-3 py-2">Proposed</th><th className="text-left px-3 py-2">9-box</th><th className="px-3 py-2">Adjust</th></tr>
+              <th className="text-right px-3 py-2">Final Rating</th><th className="text-left px-3 py-2">9-box</th><th className="text-left px-3 py-2">Adjust Rating</th></tr>
           </thead>
           <tbody className="divide-y divide-navy-100">
             {data.rows.map(r => <CalRow key={r.employee_id} r={r} reload={load} />)}
