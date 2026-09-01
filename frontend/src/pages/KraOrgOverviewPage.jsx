@@ -15,6 +15,8 @@ export default function KraOrgOverviewPage() {
   const [q, setQ] = useState('');
   const [err, setErr] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanMsg, setCleanMsg] = useState(null);
   // Fix guide item #4 (BR-1.1): bulk KRA upload, alongside the existing
   // single-employee "enter on behalf" already below. Mirrors DirectoryPage's
   // employee-import UI/flow exactly (same dry-run-first pattern) for
@@ -35,6 +37,21 @@ export default function KraOrgOverviewPage() {
     } catch (e) { setKraErr(e.message); setKraReport(e.data && e.data.errors ? e.data : null); }
   };
 
+  // Found live: KRA titles from an earlier bulk upload had the employee's
+  // own "(Name - Designation)" typed onto the end of every title in the
+  // source file. Idempotent (running it again finds nothing left to
+  // clean), and only ever strips a suffix that exactly matches that
+  // KRA's own employee — see the endpoint's own comment for why.
+  const cleanTitles = async () => {
+    setCleaning(true); setCleanMsg(null); setErr(null);
+    try {
+      const r = await api('/pms/hr/kra-sheet/clean-titles', { method: 'POST' });
+      setCleanMsg(`Checked ${r.checked} KRAs — cleaned ${r.cleaned}.`);
+      if (r.cleaned) load(q);
+    } catch (e) { setErr(e.message); }
+    setCleaning(false);
+  };
+
   if (err && !data) return <p className="text-sm text-rose-600">{err}</p>;
   if (!data) return <p className="text-sm text-navy-400">Loading…</p>;
   if (!data.cycle) return <div className="card p-8 text-center text-sm text-navy-400">No active cycle.</div>;
@@ -43,9 +60,15 @@ export default function KraOrgOverviewPage() {
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
-      <div>
-        <h2 className="text-lg font-bold">Org-wide KRA Overview</h2>
-        <p className="text-xs text-navy-400">{data.cycle.name} · every active employee's KRA status, with search and the ability to enter KRAs on someone's behalf.</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-bold">Org-wide KRA Overview</h2>
+          <p className="text-xs text-navy-400">{data.cycle.name} · every active employee's KRA status, with search and the ability to enter KRAs on someone's behalf.</p>
+        </div>
+        <div className="text-right">
+          <button className="btn-sec" disabled={cleaning} onClick={cleanTitles}>{cleaning ? 'Checking…' : 'Clean up KRA titles'}</button>
+          {cleanMsg && <p className="text-[11px] text-emerald-600 mt-1">{cleanMsg}</p>}
+        </div>
       </div>
       <div className="card p-4 space-y-2">
         <p className="lbl">Bulk KRA upload — CSV or Excel (.xlsx), one row per KRA, dry run first (BR-1.1)</p>

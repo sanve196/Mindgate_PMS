@@ -455,7 +455,7 @@ router.post('/hr/kra-sheet/:employeeId/submit', async (req, res) => {
 const KRA_BULK_REQUIRED = ['employee_email', 'kra_title', 'weight'];
 const KRA_BULK_KNOWN = ['employee_email', 'kra_title', 'weight', 'description', 'measures'];
 
-function validateKraBulkRows(rows, knownEmails) {
+function validateKraBulkRows(rows, knownEmails, empByEmail) {
   if (!rows.length) return { ok: false, fatal: 'Empty file', rows: [], errors: [], warnings: [] };
   const header = rows[0].map((h) => String(h).trim().toLowerCase().replace(/\s+/g, '_'));
   const missing = KRA_BULK_REQUIRED.filter((c) => !header.includes(c));
@@ -479,6 +479,21 @@ function validateKraBulkRows(rows, knownEmails) {
     else if (!knownEmails.has(rec.employee_email)) errors.push({ line, error: `employee_email "${rec.employee_email}" not found among active employees` });
     if (!rec.kra_title) errors.push({ line, error: 'kra_title is empty' });
     if (!Number.isFinite(rec.weight) || rec.weight <= 0) errors.push({ line, error: `weight must be a positive number (got "${get('weight')}")` });
+    // Found live: a bulk upload where the source file's kra_title column
+    // had "(Employee Name - Designation)" typed onto the end of every
+    // title, presumably by whoever filled the sheet — not something our
+    // own code adds, confirmed by reading the parsing code, which passes
+    // kra_title through verbatim. Warn (not reject) so it's caught at the
+    // dry-run/Validate step, before it's committed, rather than after.
+    const emp = empByEmail && empByEmail.get(rec.employee_email);
+    if (emp && rec.kra_title) {
+      const titleLower = rec.kra_title.toLowerCase();
+      if (emp.name && titleLower.includes(emp.name.toLowerCase())) {
+        warnings.push({ line, warning: `kra_title appears to include the employee's own name ("${emp.name}") — consider removing it for a cleaner display` });
+      } else if (emp.designation && titleLower.includes(emp.designation.toLowerCase())) {
+        warnings.push({ line, warning: `kra_title appears to include the employee's own designation ("${emp.designation}") — consider removing it for a cleaner display` });
+      }
+    }
     out.push(rec);
   });
 
@@ -528,12 +543,12 @@ router.post('/hr/kra-sheet/bulk-upload', (req, res, next) => kraUpload.single('f
       return res.status(400).json({ error: 'Legacy .xls files are not supported — please re-save the file as .xlsx (File > Save As > Excel Workbook) and upload again.' });
     }
 
-    const employees = (await db.query(`SELECT LOWER(email) AS email, id, manager_id FROM core.employees WHERE tenant_id=$1 AND status='active'`, [T(req)])).rows;
+    const employees = (await db.query(`SELECT LOWER(email) AS email, id, manager_id, name, designation FROM core.employees WHERE tenant_id=$1 AND status='active'`, [T(req)])).rows;
     const knownEmails = new Set(employees.map((e) => e.email));
     const empByEmail = new Map(employees.map((e) => [e.email, e]));
 
     const parsedRows = format === 'xlsx' ? await parseExcelBuffer(req.file.buffer) : parseCsv(req.file.buffer.toString('utf8'));
-    const report = validateKraBulkRows(parsedRows, knownEmails);
+    const report = validateKraBulkRows(parsedRows, knownEmails, empByEmail);
     if (report.fatal) return res.status(400).json({ error: report.fatal });
     const commit = req.query.commit === '1';
     if (!report.ok) return res.status(422).json({ ok: false, committed: false, ...report });
@@ -2245,6 +2260,50 @@ router.post('/hod/re-seed', async (req, res) => {
     }
     audit(req, 'HOD_QUEUE_RESEEDED', c.id, null, { checked: submitted.length, created, skippedNoHead });
     res.json({ ok: true, checked: submitted.length, created, skipped_no_head: skippedNoHead });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Found live: KRA titles from an earlier bulk upload had "(Employee Name -
+// Designation)" typed onto the end of every title in the source file —
+// confirmed this isn't something our own bulk-upload code adds (it passes
+// kra_title through verbatim), so it's a one-time data-cleanup problem,
+// not a recurring code bug. This is a repair action in the same spirit as
+// /hod/re-seed: idempotent (running it again finds nothing left to strip),
+// and only ever removes a suffix that exactly matches THAT KRA's own
+// employee's name/designation — never touches a title that just happens
+// to contain parentheses for some other reason.
+router.post('/hr/kra-sheet/clean-titles', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const rows = (await db.query(
+      `SELECT k.id, k.title, e.name, e.designation
+         FROM pms.kras k
+         JOIN pms.kra_sheets s ON s.id=k.sheet_id
+         JOIN core.employees e ON e.id=s.employee_id
+        WHERE k.tenant_id=$1`, [T(req)])).rows;
+    let cleaned = 0;
+    const examples = [];
+    for (const row of rows) {
+      if (!row.title || (!row.name && !row.designation)) continue;
+      let next = row.title;
+      const suffixes = [];
+      if (row.name && row.designation) suffixes.push(`(${row.name} - ${row.designation})`);
+      if (row.name) suffixes.push(`(${row.name})`);
+      if (row.designation) suffixes.push(`(${row.designation})`);
+      for (const suffix of suffixes) {
+        if (next.toLowerCase().endsWith(suffix.toLowerCase())) {
+          next = next.slice(0, next.length - suffix.length).trim();
+          break;
+        }
+      }
+      if (next !== row.title && next.length > 0) {
+        await db.query(`UPDATE pms.kras SET title=$2 WHERE id=$1`, [row.id, next]);
+        if (examples.length < 5) examples.push({ before: row.title, after: next });
+        cleaned++;
+      }
+    }
+    audit(req, 'KRA_TITLES_CLEANED', null, null, { checked: rows.length, cleaned });
+    res.json({ ok: true, checked: rows.length, cleaned, examples });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
