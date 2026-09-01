@@ -1423,15 +1423,23 @@ router.get('/calibration', async (req, res) => {
     const c = await activeCycle(T(req));
     if (!c) return res.json({ cycle: null });
     // Proposed = HOD rating where present, else manager rating; distribution vs bell curve.
+    // Requested after a direct UX review: the adjustment reason (mandatory
+    // at the point of adjustment) was being saved but never shown again
+    // anywhere — the page's own caption calls it "the permanent answer to
+    // why did my rating change," but nothing actually displayed that
+    // answer. Extended the existing LATERAL join (already fetching
+    // to_rating) to also carry reason/adjusted_by/at through, rather than
+    // adding a second round trip for it.
     const rows = (await db.query(
       `SELECT e.id AS employee_id, e.name, e.department,
               me.overall_rating AS manager_rating, he.overall_rating AS hod_rating,
               COALESCE(adj.to_rating, he.overall_rating, me.overall_rating) AS proposed,
+              adj.reason AS adjustment_reason, adj.adjusted_by, adj.at AS adjusted_at,
               tt.nine_box_cell, tt.potential_rating
          FROM core.employees e
          JOIN pms.manager_evaluations me ON me.cycle_id=$1 AND me.employee_id=e.id AND me.status='submitted'
          LEFT JOIN pms.hod_evaluations he ON he.cycle_id=$1 AND he.employee_id=e.id AND he.status='submitted'
-         LEFT JOIN LATERAL (SELECT to_rating FROM pms.rating_adjustments ra
+         LEFT JOIN LATERAL (SELECT to_rating, reason, adjusted_by, at FROM pms.rating_adjustments ra
                              WHERE ra.cycle_id=$1 AND ra.employee_id=e.id ORDER BY at DESC LIMIT 1) adj ON true
          LEFT JOIN pms.top_talent tt ON tt.cycle_id=$1 AND tt.employee_id=e.id
         WHERE e.tenant_id=$2 ORDER BY e.department, e.name`, [c.id, T(req)])).rows;

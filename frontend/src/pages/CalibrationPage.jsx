@@ -93,25 +93,49 @@ function CalRow({ r, reload }) {
     try { await api('/pms/calibration/top-talent', { method: 'POST', body: JSON.stringify({ employee_id: r.employee_id, nine_box_cell: v || null }) }); }
     catch (e) { setErr(e.message); }
   };
+  // Requested: the adjustment reason typed into the prompt was saved but
+  // never shown again anywhere on this page. A badge next to Proposed
+  // makes it visible AT A GLANCE that a number differs from the raw
+  // manager/DH inputs, and the reason itself is shown directly below the
+  // row — not hidden behind a hover or another click, since the whole
+  // point raised was that this information was missing from view.
+  const preAdjustment = r.hod_rating ?? r.manager_rating;
+  const wasAdjusted = r.adjustment_reason && preAdjustment != null && r.proposed != null && Number(r.proposed) !== Number(preAdjustment);
+
   return (
-    <tr>
-      <td className="px-3 py-2 font-semibold">{r.name}</td>
-      <td className="px-3 py-2">{r.department || '—'}</td>
-      <td className="px-3 py-2 text-right font-mono">{r.manager_rating ?? '—'}</td>
-      <td className="px-3 py-2 text-right font-mono">{r.hod_rating ?? '—'}</td>
-      <td className="px-3 py-2 text-right font-mono font-bold">{r.proposed ?? '—'}</td>
-      <td className="px-3 py-2">
-        <select className="inp !py-1 !text-[11px] w-auto" value={box} onChange={e => saveBox(e.target.value)}>
-          <option value="">—</option>{NINE_BOX.map(b => <option key={b}>{b}</option>)}
-        </select>
-      </td>
-      <td className="px-3 py-2">
-        <span className="inline-flex items-center gap-1">
-          <input className="inp w-14 !py-1 text-right" type="number" step="0.5" min="1" max="5" value={to} onChange={e => setTo(e.target.value)} />
-          <button className="btn-sec !py-1" disabled={!to} onClick={adjust}><SlidersHorizontal size={12} /></button>
-        </span>
-        {err && <p className="text-[10px] text-rose-600">{err}</p>}
-      </td>
-    </tr>
+    <>
+      <tr className={wasAdjusted ? 'bg-amber-50/40' : ''}>
+        <td className="px-3 py-2 font-semibold">{r.name}</td>
+        <td className="px-3 py-2">{r.department || '—'}</td>
+        <td className="px-3 py-2 text-right font-mono">{r.manager_rating ?? '—'}</td>
+        <td className="px-3 py-2 text-right font-mono">{r.hod_rating ?? '—'}</td>
+        <td className="px-3 py-2 text-right font-mono font-bold">
+          {r.proposed ?? '—'}
+          {wasAdjusted && <span className="chip bg-amber-100 text-amber-700 ml-1.5 !text-[9px] !py-0">adjusted</span>}
+        </td>
+        <td className="px-3 py-2">
+          <select className="inp !py-1 !text-[11px] w-auto" value={box} onChange={e => saveBox(e.target.value)}>
+            <option value="">—</option>{NINE_BOX.map(b => <option key={b}>{b}</option>)}
+          </select>
+        </td>
+        <td className="px-3 py-2">
+          <span className="inline-flex items-center gap-1">
+            <input className="inp w-14 !py-1 text-right" type="number" step="0.5" min="1" max="5" value={to} onChange={e => setTo(e.target.value)} />
+            <button className="btn-sec !py-1" disabled={!to} onClick={adjust}><SlidersHorizontal size={12} /></button>
+          </span>
+          {err && <p className="text-[10px] text-rose-600">{err}</p>}
+        </td>
+      </tr>
+      {wasAdjusted && (
+        <tr className="bg-amber-50/40">
+          <td colSpan={7} className="px-3 pb-2 -mt-1">
+            <p className="text-[11px] text-amber-800">
+              <b>{preAdjustment} → {r.proposed}:</b> {r.adjustment_reason}
+              <span className="text-amber-500"> — {r.adjusted_by}{r.adjusted_at ? `, ${new Date(r.adjusted_at).toLocaleDateString()}` : ''}</span>
+            </p>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
