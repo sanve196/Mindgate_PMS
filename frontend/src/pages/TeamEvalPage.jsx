@@ -99,6 +99,7 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
         <ParameterScoring employeeId={t.employee_id} editable={editable} initialRating={t.overall_rating} />
       )}
       <PerKraRating employeeId={t.employee_id} scale={scale} editable={editable} overallRating={cycleType === 'annual' ? null : f.overall_rating}
+        selfSubmitted={t.self_status === 'submitted'}
         selfEntries={t.self_entries || {}} onOverallChange={cycleType === 'annual' ? () => {} : (v) => setF(s => ({ ...s, overall_rating: v }))}
         hideOverallFooter={cycleType === 'annual'} />
       {cycleType === 'annual' && <p className="text-[10px] text-navy-400 -mt-2">Per-KRA ratings here are for reference — the 7 parameters above govern the official annual rating.</p>}
@@ -142,7 +143,7 @@ function EvalEditor({ t, phase, scale, cycleType, reload }) {
 // overall computed server-side as the weighted average — see
 // PUT /team/evaluations/:employeeId. Employee's own self-rating per KRA
 // is shown alongside (read-only) for direct comparison while rating.
-function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries, onOverallChange, hideOverallFooter }) {
+function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries, onOverallChange, hideOverallFooter, selfSubmitted }) {
   const [kras, setKras] = useState(null);
   const [entries, setEntries] = useState({});
   const [err, setErr] = useState(null);
@@ -186,6 +187,7 @@ function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries,
       </div>
       {kras.map(k => {
         const selfRating = selfEntries[k.id] && selfEntries[k.id].self_rating;
+        const selfNarrative = selfEntries[k.id] && selfEntries[k.id].narrative;
         const myRating = (entries[k.id] || {}).rating;
         return (
           <div key={k.id} className="bg-navy-50 rounded-lg p-3 space-y-1.5">
@@ -196,6 +198,20 @@ function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries,
             {selfRating != null && (
               <p className="text-[11px] text-navy-500">Employee's self-rating: <b>{KRA_GRADE_LABEL[selfRating] || selfRating}</b></p>
             )}
+            {/* Requested: show what the employee actually wrote, not just
+                their rating — paired directly above the comment box below,
+                so it's clear the manager's comment is responding to this.
+                Gated on submission (matching the existing "Their self-
+                appraisal" summary box elsewhere on this page) — the data
+                is fetched regardless of status, but showing a still-being-
+                drafted, unsubmitted write-up to the manager would be a
+                real visibility leak, not just a display choice. */}
+            {selfSubmitted && selfNarrative && (
+              <div className="bg-white border border-navy-100 rounded-lg p-2">
+                <p className="text-[10px] font-semibold text-navy-400 uppercase tracking-wide mb-0.5">Employee's write-up</p>
+                <p className="text-xs text-navy-600 whitespace-pre-wrap">{selfNarrative}</p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {(scale || []).map(s => (
                 <button key={s.value} type="button" disabled={!editable}
@@ -203,7 +219,7 @@ function PerKraRating({ employeeId, scale, editable, overallRating, selfEntries,
                   onClick={() => setRating(k.id, s.value)}>{KRA_GRADE_LABEL[s.value] || s.label}</button>
               ))}
             </div>
-            <textarea className="inp !bg-white" rows={2} placeholder="Comment on this KRA (optional)"
+            <textarea className="inp !bg-white" rows={2} placeholder="Your comment on this KRA (optional)"
               value={(entries[k.id] || {}).comment ?? ''} onChange={setComment(k.id)} disabled={!editable} />
           </div>
         );
