@@ -44,8 +44,8 @@ const NAV = [
   { group: 'Team', items: [
     { to: '/team/overview', label: 'Team Overview', icon: LayoutDashboard },
     { to: '/team/kra-sheets', label: 'Team KRA Sheets', icon: ClipboardList },
-    { to: '/team/eval', label: 'Team Evaluation', icon: Users },
     { to: '/team/connects', label: 'Quarterly Connects', icon: MessageCircle },
+    { to: '/team/eval', label: 'Team Evaluation', icon: Users },
     { to: '/hod', label: 'Delivery Head Review', icon: Landmark },
     { to: '/pip', label: 'Improvement Plans', icon: ShieldAlert },
   ]},
