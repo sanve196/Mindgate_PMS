@@ -20,7 +20,34 @@ export default function NotificationBell() {
   // be treated as "outside" and close the panel before the link/handler fires.
   const panelRef = useRef(null);
 
-  const load = () => api('/notifications').then(r => setItems(r.notifications)).catch(e => setErr(e.message));
+  // Poll loader. Explicit try/catch (rather than the previous .then/.catch)
+  // so I can BOTH clear err on success AND preserve items on failure — two
+  // things the earlier one-liner got wrong:
+  //   (1) It never reset `err` when a subsequent load succeeded, so once
+  //   any single poll had failed the red banner stuck around forever
+  //   until the panel was closed.
+  //   (2) It set err on ANY failure — including transient background
+  //   polls that failed while the previous data was still perfectly
+  //   valid — so users saw a scary "Failed to fetch" banner sitting on
+  //   top of 5 real notifications that hadn't gone anywhere.
+  // The fix is threefold: clear err on success, keep items on failure,
+  // and only actually render the error to the user when we have nothing
+  // else to show them (see the render below). Common cause of the
+  // transient failure on this deployment: agentic-pms-api is on Render's
+  // free tier, which sleeps after 15 min of no traffic — a background
+  // poll can hit the sleeping service and get a network error, then the
+  // service wakes up and the next poll succeeds seconds later.
+  const load = async () => {
+    try {
+      const r = await api('/notifications');
+      setItems(r.notifications);
+      setErr(null);
+    } catch (e) {
+      // Deliberately do NOT clear items — a transient poll failure should
+      // never wipe the last-known-good notification list from the panel.
+      setErr(e.message);
+    }
+  };
   useEffect(() => {
     load();
     const t = setInterval(load, 60000); // simple poll — no push channel exists yet
@@ -101,7 +128,15 @@ export default function NotificationBell() {
             <span>Notifications</span>
             {unread > 0 && <span className="chip bg-rose-100 text-rose-600 normal-case">{unread} unread</span>}
           </div>
-          {err && <p className="p-3 text-xs text-rose-600">{err}</p>}
+          {/*
+            Show the error banner ONLY when we have nothing else to display.
+            If items.length > 0, those are still valid — the failure was
+            just a background refresh — so surfacing a scary "Failed to
+            fetch" on top of real data would confuse more than it helps.
+            The 60-second poll will retry on its own; when it succeeds, the
+            load() function above will clear err back to null.
+          */}
+          {err && !items.length && <p className="p-3 text-xs text-rose-600">Couldn't load notifications: {err}</p>}
           {!err && !items.length && <p className="p-6 text-xs text-navy-400 text-center">Nothing yet.</p>}
           {items.map(n => (
             <a key={n.id} href={n.link || '#'} onClick={() => !n.read_at && markRead(n.id)}
