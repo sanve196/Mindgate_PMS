@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, ArrowRight, RotateCcw, Rocket, Activity, Sparkles, Trash2, Save, X, Info } from 'lucide-react';
+import { Plus, ArrowRight, RotateCcw, Rocket, Activity, Sparkles, Trash2, Save, X, Info, History, ChevronDown, ChevronUp } from 'lucide-react';
 import { api, PHASES, phaseLabel, phaseColor, DraftBadge } from '../utils/api';
 
 export default function CycleAdminPage() {
@@ -11,6 +11,20 @@ export default function CycleAdminPage() {
   useEffect(() => { load(); }, []);
 
   const [showNew, setShowNew] = useState(false);
+  // Requested: a dedicated view of each cycle's OWN history. pms.audit_log
+  // already records every one of these events with who/when — this is
+  // purely a new read + display, nothing about how events get logged
+  // changes.
+  const [openActivity, setOpenActivity] = useState(null);
+  const [activity, setActivity] = useState({});
+  const toggleActivity = async (c) => {
+    if (openActivity === c.id) { setOpenActivity(null); return; }
+    setOpenActivity(c.id);
+    if (!activity[c.id]) {
+      try { const r = await api(`/pms/cycles/${c.id}/activity`); setActivity(a => ({ ...a, [c.id]: r.events })); }
+      catch (e) { setActivity(a => ({ ...a, [c.id]: { error: e.message } })); }
+    }
+  };
   const phase = async (c, to, rollback) => {
     setErr(null);
     try { await api(`/pms/cycles/${c.id}/phase`, { method: 'POST', body: JSON.stringify({ to, rollback }) }); load(); }
@@ -106,6 +120,11 @@ export default function CycleAdminPage() {
                 <button className="btn-sec !text-rose-600 !border-rose-200" onClick={() => cancelCycle(c)}><Trash2 size={13} className="inline mr-1" />Cancel cycle</button>
               </div>
             )}
+            <button className="text-[11px] text-navy-400 flex items-center gap-1" onClick={() => toggleActivity(c)}>
+              <History size={12} />{openActivity === c.id ? 'Hide activity' : 'View activity'}
+              {openActivity === c.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            {openActivity === c.id && <CycleActivity events={activity[c.id]} />}
           </div>
         );
       })}
@@ -124,6 +143,46 @@ export default function CycleAdminPage() {
 // POST /cycles and rating-rules.js's updated Super 50 comment for how the
 // rest of the app was kept consistent with the wider 1-6 scale this
 // introduced.
+// Readable labels for every audit() action currently written anywhere in
+// the app (checked directly against the source, not guessed) — anything
+// added later without a mapping still shows sensibly via the fallback
+// (SNAKE_CASE -> "Snake case").
+const ACTION_LABELS = {
+  CYCLE_CREATED: 'Cycle created', CYCLE_PUBLISHED: 'Cycle published', CYCLE_RATING_SCALE_UPDATED: 'Rating scale updated',
+  PHASE_ADVANCE: 'Phase advanced', PHASE_ROLLBACK: 'Phase rolled back', CYCLE_CANCELLED: 'Cycle cancelled',
+  KRA_BULK_UPLOAD: 'KRA bulk upload', KRA_SUBMITTED: 'KRA submitted', KRA_SUBMITTED_ON_BEHALF: 'KRA submitted on behalf',
+  KRA_ENTERED_ON_BEHALF: 'KRA entered on behalf', KRA_TITLES_CLEANED: 'KRA titles cleaned up',
+  DEVPLAN_SUBMITTED: 'Development Plan submitted', SELF_APPRAISAL_SUBMITTED: 'Self-Appraisal submitted',
+  MANAGER_EVAL_SUBMITTED: 'Manager Evaluation submitted', HOD_EVAL_SUBMITTED: 'Delivery Head Review submitted',
+  HOD_QUEUE_RESEEDED: 'HOD queue re-seeded', MIDYEAR_SELF_SUBMITTED: 'Mid-Year self sign-off', MIDYEAR_MANAGER_SUBMITTED: 'Mid-Year manager sign-off',
+  PARAMETER_SCORES_UPDATED: '7-parameter scores updated', REVIEW_PARAMETERS_UPDATED: 'Review parameters updated',
+  RATING_ADJUSTED: 'Rating adjusted (Calibration)', PIP_AUTO_OPENED: 'PIP auto-opened', PIP_THRESHOLD_SET: 'PIP threshold set',
+  RETENTION_ALERT_SENT: 'Retention alert sent', SUPER50_FLAGGED: 'Flagged on Super 50', SUPER50_UNFLAGGED: 'Removed from Super 50',
+  CONNECT_LOGGED: 'Connect logged', CONNECT_SIGNED_OFF: 'Connect signed off', CONNECT_REMINDERS_CHECKED: 'Connect reminders checked',
+  CLOSURE_LETTER_GENERATED: 'Closure letter generated',
+};
+function actionLabel(a) { return ACTION_LABELS[a] || a.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()); }
+
+function CycleActivity({ events }) {
+  if (!events) return <p className="text-xs text-navy-400 pl-1">Loading…</p>;
+  if (events.error) return <p className="text-xs text-rose-600 pl-1">{events.error}</p>;
+  if (!events.length) return <p className="text-xs text-navy-400 pl-1">No recorded activity for this cycle yet.</p>;
+  return (
+    <div className="bg-navy-50 rounded-lg p-3 space-y-1.5 max-h-64 overflow-y-auto">
+      {events.map((e, i) => (
+        <div key={i} className="flex items-start gap-2 text-[11px]">
+          <span className="text-navy-400 shrink-0 w-32">{new Date(e.at).toLocaleString()}</span>
+          <span className="font-semibold text-navy-700 shrink-0">{actionLabel(e.action)}</span>
+          <span className="text-navy-400">— {e.actor_email || 'system'}{e.employee_name ? ` · ${e.employee_name}` : ''}</span>
+          {e.details && (e.details.from || e.details.to) && (
+            <span className="text-navy-400">({e.details.from ?? '—'} → {e.details.to ?? '—'})</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function NewCycleModal({ onClose, onCreated }) {
   const thisYear = new Date().getFullYear();
   const defaultFY = `FY${String(thisYear).slice(-2)}-${String(thisYear + 1).slice(-2)}`;

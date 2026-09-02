@@ -83,6 +83,27 @@ router.get('/cycles', async (req, res) => {
   res.json({ cycles: r.rows });
 });
 
+// Requested: a dedicated view of each cycle's OWN history. pms.audit_log
+// already records every phase advance/rollback/cancellation, calibration
+// adjustment, department-head change, and several other admin actions —
+// each with who did it and exactly when — but nothing anywhere read it
+// back. This is the first consumer of that table; write side (the
+// `audit()` helper above) is unchanged.
+router.get('/cycles/:id/activity', async (req, res) => {
+  try {
+    if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
+    const c = (await db.query(`SELECT id, name FROM pms.cycles WHERE id=$1 AND tenant_id=$2`, [req.params.id, T(req)])).rows[0];
+    if (!c) return res.status(404).json({ error: 'cycle not found' });
+    const rows = (await db.query(
+      `SELECT al.at, al.actor_email, al.action, al.details, e.name AS employee_name
+         FROM pms.audit_log al
+         LEFT JOIN core.employees e ON e.id=al.employee_id
+        WHERE al.tenant_id=$1 AND al.cycle_id=$2
+        ORDER BY al.at DESC`, [T(req), c.id])).rows;
+    res.json({ cycle: { id: c.id, name: c.name }, events: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/cycles', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
