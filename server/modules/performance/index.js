@@ -964,7 +964,17 @@ router.delete('/my/self-appraisal/evidence/:id', async (req, res) => {
 // manager_evaluations or anything the Annual Review reads.
 router.get('/my/pulse-check', async (req, res) => {
   try {
-    const c = await activeCycle(T(req), 'midyear');
+    // Was activeCycle(T(req), 'midyear') — required a cycle whose TYPE is
+    // literally 'midyear', a separate mechanism from how Mid-Year Review
+    // itself resolves the active cycle. That older, type-only check
+    // predates Mid-Year Review being restructured into a PHASE of the
+    // annual cycle rather than its own cycle type, and was never updated
+    // to match — so Pulse Check showed "No active mid-year cycle" even
+    // while the annual cycle was correctly sitting in Mid-Year Review.
+    // activeCycleForMidyear() is phase-based, not type-based, so it
+    // already covers both: a standalone midyear-type cycle, or an annual
+    // cycle currently at/past its mid_year_review phase.
+    const c = await activeCycleForMidyear(T(req));
     if (!c) return res.json({ cycle: null, parameters: [], scores: {} });
     const params = (await db.query(`SELECT id, name, weight_pct, sort_order FROM pms.review_parameters WHERE tenant_id=$1 AND active=true ORDER BY sort_order`, [T(req)])).rows;
     const scored = (await db.query(`SELECT parameter_id, score FROM pms.pulse_checks WHERE tenant_id=$1 AND cycle_id=$2 AND employee_id=$3`, [T(req), c.id, req.user.id])).rows;
@@ -977,7 +987,7 @@ router.get('/my/pulse-check', async (req, res) => {
 
 router.put('/my/pulse-check', async (req, res) => {
   try {
-    const c = await activeCycle(T(req), 'midyear');
+    const c = await activeCycleForMidyear(T(req));
     if (!c) return res.status(409).json({ error: 'No active mid-year cycle' });
     const { scores } = req.body || {};
     if (!scores || typeof scores !== 'object') return res.status(400).json({ error: 'scores object required, e.g. {"<parameter_id>": 4}' });
