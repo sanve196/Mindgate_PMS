@@ -2250,7 +2250,27 @@ router.get('/closure-letters/:employeeId/:cycleId/download', async (req, res) =>
 router.get('/reports/completion', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
-    const c = await activeCycle(T(req));
+    // The moment HR most wants this report is as a cycle closes or just
+    // after — but activeCycle() filters out closed/cancelled, so the page
+    // went blank exactly then. An explicit cycle_id names ANY cycle of
+    // this tenant regardless of phase; without it, behaviour is
+    // unchanged and we still default to whatever is active.
+    let c;
+    if (req.query.cycle_id) {
+      // Check the id's shape first: an unparseable value would otherwise
+      // fail on the uuid cast and surface as a 500 with a raw driver
+      // message rather than a clean 404.
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.query.cycle_id)) {
+        return res.status(404).json({ error: 'Cycle not found' });
+      }
+      // Scoped by tenant_id as well as id, so one tenant can't read
+      // another's cycle by guessing an id.
+      c = (await db.query(`SELECT * FROM pms.cycles WHERE id=$1 AND tenant_id=$2`,
+        [req.query.cycle_id, T(req)])).rows[0];
+      if (!c) return res.status(404).json({ error: 'Cycle not found' });
+    } else {
+      c = await activeCycle(T(req));
+    }
     if (!c) return res.json({ cycle: null, rows: [] });
     const r = await db.query(
       `SELECT e.id AS employee_id, e.name, e.department,

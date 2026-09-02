@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const HAS_DB = !!process.env.DATABASE_URL;
 const skip = !HAS_DB && 'DATABASE_URL not set — see file header';
 
-let db, server, base, tenantId, cycleId, empId, mgrId;
+let db, server, base, tenantId, cycleId, pastCycleId, empId, mgrId;
 
 before(async () => {
   if (!HAS_DB) return;
@@ -54,7 +54,12 @@ before(async () => {
 
   // A past, published cycle for the history test.
   const pastCycle = (await db.query(`INSERT INTO pms.cycles (tenant_id, name, fiscal_year, cycle_type, phase) VALUES ($1,'RAR Past','FYPAST','annual','closed') RETURNING id`, [t.id])).rows[0];
+  pastCycleId = pastCycle.id;
   await db.query(`INSERT INTO pms.employee_performance_history (tenant_id, employee_id, cycle_id, final_rating, rating_label) VALUES ($1,$2,$3,4.2,'Exceeds')`, [t.id, empId, pastCycle.id]);
+  // One approved KRA on the CLOSED cycle and nothing else, so the
+  // cycle_id test below proves real per-cycle scoping rather than just
+  // getting an empty result set back.
+  await db.query(`INSERT INTO pms.kra_sheets (tenant_id, cycle_id, employee_id, status) VALUES ($1,$2,$3,'approved')`, [t.id, pastCycleId, empId]);
 
   const app = express();
   app.use(cors());
@@ -160,4 +165,46 @@ test('Re-seed HOD evaluations: creates a pending entry for the submitted manager
 
   const count = (await db.query(`SELECT COUNT(*)::int AS n FROM pms.hod_evaluations WHERE cycle_id=$1 AND employee_id=$2`, [cycleId, empId])).rows[0];
   assert.equal(count.n, 1, 'still exactly one row, not duplicated');
+});
+
+// Regression: this report resolved its cycle ONLY through activeCycle(),
+// which filters out closed/cancelled — so it went blank at precisely the
+// moment HR wants it, just as a cycle closes. An explicit cycle_id must
+// reach a closed cycle, and omitting it must preserve the old default.
+test('Completion Report: cycle_id reaches a CLOSED cycle, still defaults to active without it', { skip }, async () => {
+  const adminAuth = await login('rar-admin@x.com');
+
+  // No cycle_id — unchanged behaviour, resolves the open cycle.
+  const dflt = await api('/pms/reports/completion', adminAuth.token);
+  assert.equal(dflt.status, 200);
+  assert.equal(dflt.body.cycle.id, cycleId);
+
+  // Explicit closed cycle — previously unreachable.
+  const past = await api(`/pms/reports/completion?cycle_id=${pastCycleId}`, adminAuth.token);
+  assert.equal(past.status, 200);
+  assert.equal(past.body.cycle.id, pastCycleId);
+  assert.equal(past.body.cycle.phase, 'closed');
+  assert.equal(past.body.cycle.name, 'RAR Past');
+
+  // Rows must be scoped to THAT cycle. This employee has an approved KRA
+  // in the closed cycle and nothing else, whereas in the active cycle
+  // their self-appraisal is submitted — so the joins prove the scoping.
+  const row = past.body.rows.find((x) => x.employee_id === empId);
+  assert.ok(row, 'employee present in the closed-cycle report');
+  assert.equal(row.kra_status, 'approved');
+  assert.equal(row.self_appraisal_status, 'not_started', 'scoped to the closed cycle, not the active one');
+  assert.equal(row.complete, false);
+
+  // Unknown id is a clean 404, not a silent fall back to the active cycle.
+  const missing = await api('/pms/reports/completion?cycle_id=00000000-0000-0000-0000-000000000000', adminAuth.token);
+  assert.equal(missing.status, 404);
+
+  // Malformed id must 404 too, not 500 on the uuid cast.
+  const junk = await api('/pms/reports/completion?cycle_id=not-a-uuid', adminAuth.token);
+  assert.equal(junk.status, 404);
+
+  // Still admin-gated when a cycle_id is supplied.
+  const strangerAuth = await login('rar-stranger@x.com');
+  const blocked = await api(`/pms/reports/completion?cycle_id=${pastCycleId}`, strangerAuth.token);
+  assert.equal(blocked.status, 403);
 });
