@@ -150,6 +150,60 @@ router.put('/cycles/:id/pip-threshold', async (req, res) => {
 });
 
 // Phase transitions: advance / rollback / cancel — audited, machine-checked.
+// Requested: phase changes (KRA Setting opening, Self-Appraisal opening,
+// etc.) sent NO notification to anyone — audit-logged, but nothing told
+// employees, managers, Delivery Heads, or HR that something had opened
+// for them. Scoped role-wise per a confirmed mapping: only people who
+// actually have something to do in a phase get notified about it, not
+// the whole tenant every time.
+const PHASE_OPEN_NOTICES = {
+  kra_open: [{ audience: 'all', title: 'KRA Setting is now open', body: 'Set your KRAs for this cycle.' }],
+  growth_planning: [{ audience: 'all', title: 'Growth Planning is now open', body: 'Set your Development Plan and Career Path for this cycle.' }],
+  mid_year_review: [
+    { audience: 'all', title: 'Mid-Year Review is now open', body: 'Your Mid-Year Review is open — add your reflection and self-rating.' },
+    { audience: 'managers', title: 'Mid-Year Review is now open for your team', body: 'Mid-Year Review is open for your direct reports.' },
+  ],
+  self_appraisal: [{ audience: 'all', title: 'Self-Appraisal is now open', body: 'Self-Appraisal is now open for this cycle.' }],
+  manager_eval: [{ audience: 'managers', title: 'Team Evaluation is now open', body: 'Team Evaluation is open for your direct reports.' }],
+  hod_eval: [{ audience: 'delivery_heads', title: 'Delivery Head Review is now open', body: 'Delivery Head Review is now open for your department.' }],
+  calibration: [{ audience: 'hr_admin', title: 'Calibration is now open', body: 'Calibration is now open for this cycle.' }],
+};
+
+async function notifyAudience(tenantId, audience, kind, title, body, link) {
+  const audienceSql = {
+    all: `SELECT id FROM core.employees WHERE tenant_id=$1 AND status='active'`,
+    managers: `SELECT DISTINCT manager_id AS id FROM core.employees WHERE tenant_id=$1 AND status='active' AND manager_id IS NOT NULL`,
+    delivery_heads: `SELECT DISTINCT employee_id AS id FROM core.department_heads WHERE tenant_id=$1`,
+    hr_admin: `SELECT e.id FROM core.employees e JOIN core.user_roles ur ON LOWER(ur.email)=LOWER(e.email) AND ur.tenant_id=e.tenant_id WHERE e.tenant_id=$1 AND ur.role IN ('admin','hr')`,
+  }[audience];
+  if (!audienceSql) return;
+  // Single INSERT...SELECT rather than one notify() call per employee —
+  // this audience can run into the hundreds, and a bulk insert avoids
+  // that many sequential round trips for what's otherwise an infrequent,
+  // low-stakes broadcast.
+  await db.query(
+    `INSERT INTO core.notifications (tenant_id, employee_id, kind, title, body, link)
+     SELECT $1, aud.id, $2, $3, $4, $5 FROM (${audienceSql}) aud`,
+    [tenantId, kind, title, body || null, link || null]);
+}
+
+async function sendPhaseNotices(tenantId, phase, direction) {
+  const notices = PHASE_OPEN_NOTICES[phase];
+  if (!notices) return;
+  for (const n of notices) {
+    // Titles all consistently contain "is now open" / "is open" (verified
+    // against every entry above), so this transform is reliable. Bodies
+    // are NOT consistently phrased that way (e.g. "Set your KRAs for this
+    // cycle." has nothing to find/replace) — a regex on body text silently
+    // left closing notifications saying to go do the task that just
+    // closed. Using a fixed, safe close-direction body instead of trying
+    // to derive one from open-direction text.
+    const title = direction === 'open' ? n.title : n.title.replace('is now open', 'has closed').replace('is open', 'is now closed');
+    const body = direction === 'open' ? n.body : `This is no longer open.`;
+    await notifyAudience(tenantId, n.audience, 'phase_change', title, body, '/pms/my/kras');
+  }
+}
+
 router.post('/cycles/:id/phase', async (req, res) => {
   try {
     if (!(await hasPermission(req.user, 'pms_admin'))) return res.status(403).json({ error: "Requires 'pms_admin'" });
@@ -163,6 +217,15 @@ router.post('/cycles/:id/phase', async (req, res) => {
     if (!check.ok) return res.status(409).json({ error: check.reason });
     await db.query(`UPDATE pms.cycles SET phase=$1, updated_at=now() WHERE id=$2`, [target, c.id]);
     audit(req, cancel ? 'CYCLE_CANCELLED' : rollback ? 'PHASE_ROLLBACK' : 'PHASE_ADVANCE', c.id, null, { from: c.phase, to: target });
+    if (cancel) {
+      await notifyAudience(T(req), 'all', 'phase_change', `${c.name} has been cancelled`, 'This performance cycle has been cancelled by HR.', '/pms/my/kras');
+    } else if (rollback) {
+      // Rolling back closes the phase being LEFT (c.phase) — notify its
+      // audience it's no longer open, same as a forward close would.
+      await sendPhaseNotices(T(req), c.phase, 'close');
+    } else {
+      await sendPhaseNotices(T(req), target, 'open');
+    }
     res.json({ ok: true, phase: target });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
