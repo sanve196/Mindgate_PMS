@@ -142,8 +142,25 @@ function NewConnectForm({ me, team, onSaved }) {
           </div>
           <div>
             <p className="lbl mb-0.5">Progress this cycle</p>
-            <p className={`font-semibold ${cadence.on_track ? 'text-emerald-700' : 'text-amber-700'}`}>{cadence.logged_count} of {cadence.expected_so_far} expected so far</p>
-            <p className="text-navy-400">{cadence.on_track ? 'On track' : 'Behind'}</p>
+            {/* Fixed: "X of Y expected so far" read as broken ("3 of 1
+                expected so far") whenever someone was AHEAD of pace, since
+                that phrasing only reads naturally when logged <= expected.
+                The underlying numbers were always correct — this was a
+                display-only gap. Recast as a 3-way status instead of the
+                previous on-track/behind binary, since "on track" was
+                understating being significantly ahead. */}
+            {(() => {
+              const { logged_count: logged, expected_so_far: expected } = cadence;
+              const status = logged > expected ? 'ahead' : logged === expected ? 'on_track' : 'behind';
+              const color = status === 'behind' ? 'text-amber-700' : 'text-emerald-700';
+              const label = status === 'ahead' ? 'Ahead of pace' : status === 'on_track' ? 'On track' : 'Behind';
+              return (
+                <>
+                  <p className={`font-semibold ${color}`}>{logged} logged · {expected} expected by now</p>
+                  <p className="text-navy-400">{label}</p>
+                </>
+              );
+            })()}
           </div>
           <div>
             <p className="lbl mb-0.5">Next due</p>
